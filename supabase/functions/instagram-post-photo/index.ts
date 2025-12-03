@@ -66,14 +66,28 @@ serve(async (req) => {
 
     console.log('Posting photo to account:', account.username);
 
-    // Parse cookies
-    const cookieObj: Record<string, string> = {};
-    account.cookies.split(';').forEach((cookie: string) => {
-      const [key, value] = cookie.trim().split('=');
-      if (key && value) {
-        cookieObj[key.trim()] = value.trim();
+    // Parse cookies - supports both string and JSON format
+    let cookieObj: Record<string, string> = {};
+    let cookieString = account.cookies;
+    
+    const trimmedCookies = account.cookies.trim();
+    if (trimmedCookies.startsWith('{') && trimmedCookies.endsWith('}')) {
+      try {
+        cookieObj = JSON.parse(trimmedCookies);
+        cookieString = Object.entries(cookieObj)
+          .map(([key, value]) => `${key}=${value}`)
+          .join('; ');
+      } catch (e) {
+        console.error('Failed to parse JSON cookies:', e);
       }
-    });
+    } else {
+      account.cookies.split(';').forEach((cookie: string) => {
+        const [key, value] = cookie.trim().split('=');
+        if (key && value) {
+          cookieObj[key.trim()] = value.trim();
+        }
+      });
+    }
 
     const csrfToken = cookieObj['csrftoken'];
     const dsUserId = cookieObj['ds_user_id'];
@@ -134,7 +148,7 @@ serve(async (req) => {
               quality: '80',
             }),
           }),
-          'Cookie': account.cookies,
+          'Cookie': cookieString,
           'Content-Type': 'application/octet-stream',
         },
         body: new Uint8Array(imageBuffer),
@@ -163,7 +177,7 @@ serve(async (req) => {
           'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229258)',
           'X-CSRFToken': csrfToken,
           'X-IG-App-ID': '936619743392459',
-          'Cookie': account.cookies,
+          'Cookie': cookieString,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: new URLSearchParams({

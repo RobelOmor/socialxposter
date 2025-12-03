@@ -115,7 +115,10 @@ export function BulkImportDialog({
           const cell = firstSheet[cellAddress];
           if (cell && cell.v) {
             const value = String(cell.v).trim();
-            if (value && value.includes('sessionid')) {
+            // Check for string format (contains sessionid) or JSON format (has sessionid key)
+            const isValidCookie = value.includes('sessionid') || 
+              (value.startsWith('{') && value.includes('"sessionid"'));
+            if (value && isValidCookie) {
               extractedCookies.push(value);
             }
           }

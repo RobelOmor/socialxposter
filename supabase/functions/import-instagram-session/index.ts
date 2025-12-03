@@ -35,14 +35,32 @@ serve(async (req) => {
       );
     }
 
-    // Parse cookies to extract required values
-    const cookieObj: Record<string, string> = {};
-    cookies.split(';').forEach((cookie: string) => {
-      const [key, value] = cookie.trim().split('=');
-      if (key && value) {
-        cookieObj[key.trim()] = value.trim();
+    // Parse cookies to extract required values - supports both string and JSON format
+    let cookieObj: Record<string, string> = {};
+    let cookieString = cookies;
+    
+    // Check if cookies is JSON format
+    const trimmedCookies = cookies.trim();
+    if (trimmedCookies.startsWith('{') && trimmedCookies.endsWith('}')) {
+      try {
+        const jsonCookies = JSON.parse(trimmedCookies);
+        cookieObj = jsonCookies;
+        // Convert JSON to cookie string for API requests
+        cookieString = Object.entries(jsonCookies)
+          .map(([key, value]) => `${key}=${value}`)
+          .join('; ');
+      } catch (e) {
+        console.error('Failed to parse JSON cookies:', e);
       }
-    });
+    } else {
+      // Parse string format cookies
+      cookies.split(';').forEach((cookie: string) => {
+        const [key, value] = cookie.trim().split('=');
+        if (key && value) {
+          cookieObj[key.trim()] = value.trim();
+        }
+      });
+    }
 
     const sessionId = cookieObj['sessionid'];
     const dsUserId = cookieObj['ds_user_id'];
@@ -65,7 +83,7 @@ serve(async (req) => {
           'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229258)',
           'X-CSRFToken': csrfToken,
           'X-IG-App-ID': '936619743392459',
-          'Cookie': cookies,
+          'Cookie': cookieString,
         },
       }
     );
@@ -121,7 +139,7 @@ serve(async (req) => {
           posts_count: igUser.media_count || 0,
           followers_count: igUser.follower_count || 0,
           following_count: igUser.following_count || 0,
-          cookies: cookies,
+          cookies: cookieString,
           status: 'active',
           last_checked: new Date().toISOString(),
         });
