@@ -106,6 +106,8 @@ serve(async (req) => {
 
     // Step 1: Upload photo
     console.log('Uploading photo...');
+    const imageLength = imageBuffer.byteLength;
+    
     const uploadResponse = await fetch(
       `https://i.instagram.com/rupload_igphoto/${entityName}`,
       {
@@ -115,8 +117,9 @@ serve(async (req) => {
           'X-CSRFToken': csrfToken,
           'X-IG-App-ID': '936619743392459',
           'X-Entity-Name': entityName,
-          'X-Entity-Length': imageBuffer.byteLength.toString(),
+          'X-Entity-Length': String(imageLength),
           'X-Entity-Type': 'image/jpeg',
+          'Offset': '0',
           'X-Instagram-Rupload-Params': JSON.stringify({
             upload_id: uploadId,
             media_type: 1,
@@ -134,7 +137,7 @@ serve(async (req) => {
           'Cookie': account.cookies,
           'Content-Type': 'application/octet-stream',
         },
-        body: imageBuffer,
+        body: new Uint8Array(imageBuffer),
       }
     );
 
