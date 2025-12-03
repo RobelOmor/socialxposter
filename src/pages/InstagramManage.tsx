@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { BulkImportDialog } from '@/components/instagram/BulkImportDialog';
 import { 
   Plus, 
   RefreshCw, 
@@ -23,7 +25,10 @@ import {
   Instagram,
   Loader2,
   CheckCircle2,
-  XCircle
+  XCircle,
+  ChevronDown,
+  FileSpreadsheet,
+  Sparkles
 } from 'lucide-react';
 
 interface InstagramAccount {
@@ -36,7 +41,15 @@ interface InstagramAccount {
   following_count: number;
   status: 'active' | 'expired' | 'pending';
   cookies: string;
+  created_at: string | null;
 }
+
+const isToday = (dateString: string | null): boolean => {
+  if (!dateString) return false;
+  const date = new Date(dateString);
+  const today = new Date();
+  return date.toDateString() === today.toDateString();
+};
 
 export default function InstagramManage() {
   const { user, profile } = useAuth();
@@ -52,6 +65,7 @@ export default function InstagramManage() {
   const [imageUrl, setImageUrl] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState('');
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
 
   useEffect(() => {
     fetchAccounts();
@@ -235,13 +249,27 @@ export default function InstagramManage() {
             </p>
           </div>
           
-          <Dialog open={importOpen} onOpenChange={setImportOpen}>
-            <DialogTrigger asChild>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
               <Button className="gap-2">
                 <Plus className="h-4 w-4" />
-                Add Instagram
+                Add Account
+                <ChevronDown className="h-4 w-4" />
               </Button>
-            </DialogTrigger>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setImportOpen(true)} className="gap-2">
+                <Plus className="h-4 w-4" />
+                Single Add Account
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setBulkImportOpen(true)} className="gap-2">
+                <FileSpreadsheet className="h-4 w-4" />
+                Bulk Add Account
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Dialog open={importOpen} onOpenChange={setImportOpen}>
             <DialogContent className="sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>Connect Instagram Account</DialogTitle>
@@ -344,17 +372,29 @@ export default function InstagramManage() {
                         <TableCell className="text-center">{account.followers_count.toLocaleString()}</TableCell>
                         <TableCell className="text-center">{account.following_count.toLocaleString()}</TableCell>
                         <TableCell className="text-center">
-                          <Badge 
-                            variant={account.status === 'active' ? 'default' : 'destructive'}
-                            className={account.status === 'active' ? 'bg-green-500/20 text-green-500 hover:bg-green-500/30' : ''}
-                          >
-                            {account.status === 'active' ? (
-                              <CheckCircle2 className="h-3 w-3 mr-1" />
+                          <div className="flex items-center justify-center gap-2">
+                            <Badge 
+                              variant={account.status === 'active' ? 'default' : 'destructive'}
+                              className={account.status === 'active' ? 'bg-green-500/20 text-green-500 hover:bg-green-500/30' : ''}
+                            >
+                              {account.status === 'active' ? (
+                                <CheckCircle2 className="h-3 w-3 mr-1" />
+                              ) : (
+                                <XCircle className="h-3 w-3 mr-1" />
+                              )}
+                              {account.status}
+                            </Badge>
+                            {isToday(account.created_at) ? (
+                              <Badge className="bg-purple-500/20 text-purple-400 hover:bg-purple-500/30">
+                                <Sparkles className="h-3 w-3 mr-1" />
+                                New
+                              </Badge>
                             ) : (
-                              <XCircle className="h-3 w-3 mr-1" />
+                              <Badge variant="outline" className="text-muted-foreground">
+                                Regular
+                              </Badge>
                             )}
-                            {account.status}
-                          </Badge>
+                          </div>
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center justify-end gap-2">
@@ -391,6 +431,15 @@ export default function InstagramManage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Bulk Import Dialog */}
+        <BulkImportDialog
+          open={bulkImportOpen}
+          onOpenChange={setBulkImportOpen}
+          onComplete={fetchAccounts}
+          accountLimit={profile?.account_limit ?? null}
+          currentAccountCount={accounts.length}
+        />
 
         {/* Post Dialog */}
         <Dialog open={postOpen} onOpenChange={setPostOpen}>
