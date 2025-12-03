@@ -66,12 +66,27 @@ serve(async (req) => {
 
     console.log('Posting photo to account:', account.username);
 
-    // Parse cookies - supports both string and JSON format
+    // Parse cookies - supports string, JSON object, and JSON array formats
     let cookieObj: Record<string, string> = {};
     let cookieString = account.cookies;
     
     const trimmedCookies = account.cookies.trim();
-    if (trimmedCookies.startsWith('{') && trimmedCookies.endsWith('}')) {
+    
+    if (trimmedCookies.startsWith('[') && trimmedCookies.endsWith(']')) {
+      try {
+        const jsonArray = JSON.parse(trimmedCookies);
+        jsonArray.forEach((cookie: { name: string; value: string }) => {
+          if (cookie.name && cookie.value) {
+            cookieObj[cookie.name] = cookie.value;
+          }
+        });
+        cookieString = Object.entries(cookieObj)
+          .map(([key, value]) => `${key}=${value}`)
+          .join('; ');
+      } catch (e) {
+        console.error('Failed to parse JSON array cookies:', e);
+      }
+    } else if (trimmedCookies.startsWith('{') && trimmedCookies.endsWith('}')) {
       try {
         cookieObj = JSON.parse(trimmedCookies);
         cookieString = Object.entries(cookieObj)
