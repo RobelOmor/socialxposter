@@ -35,31 +35,51 @@ serve(async (req) => {
       );
     }
 
-    // Parse cookies to extract required values - supports both string and JSON format
+    // Parse cookies to extract required values - supports string, JSON object, and JSON array formats
     let cookieObj: Record<string, string> = {};
     let cookieString = cookies;
     
-    // Check if cookies is JSON format
     const trimmedCookies = cookies.trim();
-    if (trimmedCookies.startsWith('{') && trimmedCookies.endsWith('}')) {
+    
+    // Check if cookies is JSON array format (array of {name, value} objects)
+    if (trimmedCookies.startsWith('[') && trimmedCookies.endsWith(']')) {
       try {
-        const jsonCookies = JSON.parse(trimmedCookies);
-        cookieObj = jsonCookies;
-        // Convert JSON to cookie string for API requests
-        cookieString = Object.entries(jsonCookies)
+        const jsonArray = JSON.parse(trimmedCookies);
+        jsonArray.forEach((cookie: { name: string; value: string }) => {
+          if (cookie.name && cookie.value) {
+            cookieObj[cookie.name] = cookie.value;
+          }
+        });
+        // Convert to cookie string for API requests
+        cookieString = Object.entries(cookieObj)
           .map(([key, value]) => `${key}=${value}`)
           .join('; ');
+        console.log('Parsed JSON array cookies, found keys:', Object.keys(cookieObj));
       } catch (e) {
-        console.error('Failed to parse JSON cookies:', e);
+        console.error('Failed to parse JSON array cookies:', e);
       }
-    } else {
-      // Parse string format cookies
+    } 
+    // Check if cookies is JSON object format
+    else if (trimmedCookies.startsWith('{') && trimmedCookies.endsWith('}')) {
+      try {
+        cookieObj = JSON.parse(trimmedCookies);
+        cookieString = Object.entries(cookieObj)
+          .map(([key, value]) => `${key}=${value}`)
+          .join('; ');
+        console.log('Parsed JSON object cookies');
+      } catch (e) {
+        console.error('Failed to parse JSON object cookies:', e);
+      }
+    } 
+    // String format cookies
+    else {
       cookies.split(';').forEach((cookie: string) => {
         const [key, value] = cookie.trim().split('=');
         if (key && value) {
           cookieObj[key.trim()] = value.trim();
         }
       });
+      console.log('Parsed string format cookies');
     }
 
     const sessionId = cookieObj['sessionid'];
