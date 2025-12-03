@@ -78,7 +78,8 @@ export default function InstagramManage() {
       return;
     }
 
-    if (profile && accounts.length >= profile.account_limit) {
+    // account_limit null means unlimited (premium)
+    if (profile && profile.account_limit !== null && accounts.length >= profile.account_limit) {
       toast.error(`Account limit reached (${profile.account_limit}). Upgrade to add more.`);
       return;
     }

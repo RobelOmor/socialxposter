@@ -54,7 +54,7 @@ export default function Settings() {
                   {profile?.subscription_plan} Plan
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  {profile?.account_limit} accounts allowed
+                  {profile?.account_limit === null ? 'Unlimited' : profile?.account_limit} accounts allowed
                 </p>
               </div>
               {profile?.subscription_plan === 'free' && (
