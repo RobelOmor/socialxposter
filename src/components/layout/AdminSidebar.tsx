@@ -1,31 +1,33 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
-  Share2, 
+  Users, 
   Instagram, 
+  Shield,
   Settings, 
   LogOut,
   ChevronDown,
   Zap,
-  Shield
+  Home
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 
-export function Sidebar() {
+export function AdminSidebar() {
   const location = useLocation();
-  const { signOut, profile, isAdmin } = useAuth();
-  const [socialExpanded, setSocialExpanded] = useState(
-    location.pathname.includes('/social') || location.pathname.includes('/instagram')
-  );
+  const { signOut, profile } = useAuth();
+  const [manageExpanded, setManageExpanded] = useState(true);
 
   const navItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
+    { icon: LayoutDashboard, label: 'Admin Dashboard', path: '/admin' },
+    { icon: Home, label: 'Back to App', path: '/dashboard' },
   ];
 
-  const socialItems = [
-    { icon: Instagram, label: 'Instagram Manage', path: '/instagram-manage' },
+  const manageItems = [
+    { icon: Users, label: 'Users', path: '/admin/users' },
+    { icon: Instagram, label: 'Instagram Accounts', path: '/admin/instagram-accounts' },
+    { icon: Shield, label: 'Roles', path: '/admin/roles' },
   ];
 
   return (
@@ -33,12 +35,12 @@ export function Sidebar() {
       <div className="flex h-full flex-col">
         {/* Logo */}
         <div className="flex h-16 items-center gap-3 border-b border-border px-6">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary">
-            <Zap className="h-5 w-5 text-primary-foreground" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-destructive">
+            <Shield className="h-5 w-5 text-destructive-foreground" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-foreground">SocialX</h1>
-            <p className="text-xs text-muted-foreground">Account Manager</p>
+            <h1 className="text-lg font-bold text-foreground">Admin Panel</h1>
+            <p className="text-xs text-muted-foreground">SocialX Manager</p>
           </div>
         </div>
 
@@ -48,6 +50,7 @@ export function Sidebar() {
             <NavLink
               key={item.path}
               to={item.path}
+              end={item.path === '/admin'}
               className={({ isActive }) =>
                 cn(
                   'flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-all',
@@ -62,32 +65,32 @@ export function Sidebar() {
             </NavLink>
           ))}
 
-          {/* Social Manage Dropdown */}
+          {/* Manage Dropdown */}
           <div>
             <button
-              onClick={() => setSocialExpanded(!socialExpanded)}
+              onClick={() => setManageExpanded(!manageExpanded)}
               className={cn(
                 'flex w-full items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-all',
-                socialExpanded || location.pathname.includes('/instagram')
+                manageExpanded
                   ? 'bg-secondary text-foreground'
                   : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
               )}
             >
               <div className="flex items-center gap-3">
-                <Share2 className="h-5 w-5" />
-                Social Manage
+                <Settings className="h-5 w-5" />
+                Manage
               </div>
               <ChevronDown
                 className={cn(
                   'h-4 w-4 transition-transform',
-                  socialExpanded && 'rotate-180'
+                  manageExpanded && 'rotate-180'
                 )}
               />
             </button>
             
-            {socialExpanded && (
+            {manageExpanded && (
               <div className="ml-4 mt-1 space-y-1 border-l border-border pl-4">
-                {socialItems.map((item) => (
+                {manageItems.map((item) => (
                   <NavLink
                     key={item.path}
                     to={item.path}
@@ -107,53 +110,16 @@ export function Sidebar() {
               </div>
             )}
           </div>
-
-          <NavLink
-            to="/settings"
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-all',
-                isActive
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-              )
-            }
-          >
-            <Settings className="h-5 w-5" />
-            Settings
-          </NavLink>
-
-          {isAdmin && (
-            <NavLink
-              to="/admin"
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-all',
-                  isActive
-                    ? 'bg-destructive text-destructive-foreground'
-                    : 'text-destructive hover:bg-destructive/10'
-                )
-              }
-            >
-              <Shield className="h-5 w-5" />
-              Admin Panel
-            </NavLink>
-          )}
         </nav>
 
         {/* User Info & Logout */}
         <div className="border-t border-border p-4">
-          <div className="mb-3 rounded-lg bg-secondary/50 p-3">
+          <div className="mb-3 rounded-lg bg-destructive/10 p-3">
             <p className="text-sm font-medium text-foreground">{profile?.full_name}</p>
             <p className="text-xs text-muted-foreground">{profile?.email}</p>
             <div className="mt-2 flex items-center gap-2">
-              <span className={cn(
-                "rounded-full px-2 py-0.5 text-xs font-medium",
-                profile?.subscription_plan === 'premium' 
-                  ? "bg-primary/20 text-primary" 
-                  : "bg-muted text-muted-foreground"
-              )}>
-                {profile?.subscription_plan === 'premium' ? 'Premium' : 'Free'}
+              <span className="rounded-full bg-destructive/20 px-2 py-0.5 text-xs font-medium text-destructive">
+                Admin
               </span>
             </div>
           </div>

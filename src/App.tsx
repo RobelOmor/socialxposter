@@ -8,6 +8,10 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import InstagramManage from "./pages/InstagramManage";
 import Settings from "./pages/Settings";
+import Admin from "./pages/Admin";
+import AdminUsers from "./pages/admin/AdminUsers";
+import AdminInstagramAccounts from "./pages/admin/AdminInstagramAccounts";
+import AdminRoles from "./pages/admin/AdminRoles";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -56,6 +60,10 @@ function AppRoutes() {
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/instagram-manage" element={<ProtectedRoute><InstagramManage /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+      <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
+      <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
+      <Route path="/admin/instagram-accounts" element={<ProtectedRoute><AdminInstagramAccounts /></ProtectedRoute>} />
+      <Route path="/admin/roles" element={<ProtectedRoute><AdminRoles /></ProtectedRoute>} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
