@@ -99,28 +99,16 @@ serve(async (req) => {
       .single();
 
     if (existingAccount) {
-      // Update existing account
-      const { error: updateError } = await supabaseClient
-        .from('instagram_accounts')
-        .update({
-          full_name: igUser.full_name,
-          profile_pic_url: igUser.profile_pic_url,
-          posts_count: igUser.media_count || 0,
-          followers_count: igUser.follower_count || 0,
-          following_count: igUser.following_count || 0,
-          cookies: cookies,
-          status: 'active',
-          last_checked: new Date().toISOString(),
-        })
-        .eq('id', existingAccount.id);
-
-      if (updateError) {
-        console.error('Update error:', updateError);
-        return new Response(
-          JSON.stringify({ success: false, error: 'Failed to update account' }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
+      // Account already exists - return duplicate status
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: 'Account already connected',
+          duplicate: true,
+          data: { username: igUser.username }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     } else {
       // Insert new account
       const { error: insertError } = await supabaseClient
