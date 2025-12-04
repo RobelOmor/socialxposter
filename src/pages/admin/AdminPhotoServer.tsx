@@ -190,33 +190,58 @@ export default function AdminPhotoServer() {
     setUploadProgress(0);
 
     const previousCount = selectedCategory.photo_count;
-    const duplicates: string[] = [];
     let insertedCount = 0;
+    let duplicateCount = 0;
     const chunkSize = 100;
     const totalChunks = Math.ceil(photoUrls.length / chunkSize);
 
     try {
-      for (let i = 0; i < totalChunks; i++) {
-        const chunk = photoUrls.slice(i * chunkSize, (i + 1) * chunkSize);
+      // Get existing URLs for this category to detect duplicates
+      const { data: existingItems } = await supabase
+        .from('photo_service_items')
+        .select('photo_url')
+        .eq('category_id', selectedCategory.id);
+      
+      const existingUrls = new Set(existingItems?.map(item => item.photo_url) || []);
+      
+      // Filter out duplicates
+      const newUrls: string[] = [];
+      const duplicates: string[] = [];
+      
+      for (const url of photoUrls) {
+        if (existingUrls.has(url)) {
+          duplicates.push(url);
+        } else {
+          newUrls.push(url);
+          existingUrls.add(url); // Prevent duplicates within the file itself
+        }
+      }
+      
+      duplicateCount = duplicates.length;
+      
+      // Batch insert new URLs in chunks
+      const newTotalChunks = Math.ceil(newUrls.length / chunkSize);
+      
+      for (let i = 0; i < newTotalChunks; i++) {
+        const chunk = newUrls.slice(i * chunkSize, (i + 1) * chunkSize);
         
-        for (const url of chunk) {
-          const { error } = await supabase
-            .from('photo_service_items')
-            .upsert(
-              { category_id: selectedCategory.id, photo_url: url },
-              { onConflict: 'category_id,photo_url', ignoreDuplicates: false }
-            );
+        // Prepare batch data
+        const batchData = chunk.map(url => ({
+          category_id: selectedCategory.id,
+          photo_url: url
+        }));
+        
+        // Batch insert all at once
+        const { error, data } = await supabase
+          .from('photo_service_items')
+          .insert(batchData)
+          .select();
 
-          if (error) {
-            if (error.code === '23505') {
-              duplicates.push(url);
-            }
-          } else {
-            insertedCount++;
-          }
+        if (!error && data) {
+          insertedCount += data.length;
         }
 
-        setUploadProgress(Math.round(((i + 1) / totalChunks) * 100));
+        setUploadProgress(Math.round(((i + 1) / newTotalChunks) * 100));
       }
 
       // Get updated count
@@ -224,13 +249,13 @@ export default function AdminPhotoServer() {
         .from('photo_service_categories')
         .select('photo_count')
         .eq('id', selectedCategory.id)
-        .single();
+        .maybeSingle();
 
       setUploadReport({
         previousCount,
         insertedCount,
         currentCount: updatedCategory?.photo_count || previousCount + insertedCount,
-        duplicateCount: duplicates.length,
+        duplicateCount,
         duplicates
       });
 
@@ -238,7 +263,7 @@ export default function AdminPhotoServer() {
       
       toast({
         title: "Upload Complete",
-        description: `Inserted ${insertedCount} photos, ${duplicates.length} duplicates skipped`
+        description: `Inserted ${insertedCount} photos, ${duplicateCount} duplicates skipped`
       });
     } catch (error: any) {
       toast({
