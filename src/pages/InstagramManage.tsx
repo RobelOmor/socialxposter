@@ -34,7 +34,9 @@ import {
   FolderPlus,
   Layers,
   Send,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Download,
+  Pencil
 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 
@@ -120,6 +122,12 @@ export default function InstagramManage() {
   const [bioEditAccount, setBioEditAccount] = useState<InstagramAccount | null>(null);
   const [newBioText, setNewBioText] = useState('');
   const [updatingBio, setUpdatingBio] = useState(false);
+
+  // Batch rename state
+  const [renameModalOpen, setRenameModalOpen] = useState(false);
+  const [renamingBatch, setRenamingBatch] = useState<AccountBatch | null>(null);
+  const [newBatchNameRename, setNewBatchNameRename] = useState('');
+  const [savingRename, setSavingRename] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -723,6 +731,76 @@ export default function InstagramManage() {
     }
   };
 
+  // Handle batch rename
+  const openBatchRename = (batch: AccountBatch, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRenamingBatch(batch);
+    setNewBatchNameRename(batch.name);
+    setRenameModalOpen(true);
+  };
+
+  const handleRenameBatch = async () => {
+    if (!renamingBatch || !newBatchNameRename.trim()) return;
+    
+    setSavingRename(true);
+    try {
+      const { error } = await supabase
+        .from('account_batches')
+        .update({ name: newBatchNameRename.trim() })
+        .eq('id', renamingBatch.id);
+
+      if (error) throw error;
+      
+      toast.success('Batch renamed successfully');
+      setBatches(prev => prev.map(b => 
+        b.id === renamingBatch.id ? { ...b, name: newBatchNameRename.trim() } : b
+      ));
+      setRenameModalOpen(false);
+    } catch (error) {
+      console.error('Batch rename error:', error);
+      toast.error('Failed to rename batch');
+    } finally {
+      setSavingRename(false);
+    }
+  };
+
+  // Download selected accounts as CSV
+  const handleDownloadCSV = () => {
+    const accountsToDownload = filteredAccounts.filter(acc => selectedAccounts.has(acc.id));
+    
+    if (accountsToDownload.length === 0) {
+      toast.error('Please select accounts to download');
+      return;
+    }
+
+    const headers = ['#', 'Username', 'Full Name', 'Posts', 'Followers', 'Following', 'Bio', 'Status', 'Submitted'];
+    const csvRows = [headers.join(',')];
+
+    accountsToDownload.forEach((acc, index) => {
+      const row = [
+        index + 1,
+        `@${acc.username}`,
+        `"${(acc.full_name || '').replace(/"/g, '""')}"`,
+        acc.posts_count,
+        acc.followers_count,
+        acc.following_count,
+        `"${(acc.bio || 'no_bio_set').replace(/"/g, '""')}"`,
+        acc.status,
+        acc.created_at ? new Date(acc.created_at).toLocaleDateString() : ''
+      ];
+      csvRows.push(row.join(','));
+    });
+
+    const csvContent = csvRows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `instagram_accounts_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    
+    toast.success(`Downloaded ${accountsToDownload.length} accounts`);
+  };
+
   // Filter accounts based on selected batch and search query
   const filteredAccounts = accounts.filter(account => {
     // Batch filter
@@ -831,20 +909,42 @@ export default function InstagramManage() {
             <div className="flex flex-wrap items-center gap-2 mb-4">
               <div className="flex items-center gap-2">
                 <Layers className="h-4 w-4 text-muted-foreground" />
-                <Select value={selectedBatchFilter} onValueChange={setSelectedBatchFilter}>
-                  <SelectTrigger className="w-[160px] sm:w-[180px]">
-                    <SelectValue placeholder="Filter by batch" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-popover border-border">
-                    <SelectItem value="all">All Accounts</SelectItem>
-                    <SelectItem value="unbatched">Unbatched</SelectItem>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="w-[160px] sm:w-[180px] justify-between">
+                      <span className="truncate">
+                        {selectedBatchFilter === 'all' ? 'All Accounts' : 
+                         selectedBatchFilter === 'unbatched' ? 'Unbatched' :
+                         batches.find(b => b.id === selectedBatchFilter)?.name || 'Select batch'}
+                      </span>
+                      <ChevronDown className="h-4 w-4 ml-2 shrink-0" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="bg-popover border-border w-[200px]">
+                    <DropdownMenuItem onClick={() => setSelectedBatchFilter('all')}>
+                      All Accounts
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setSelectedBatchFilter('unbatched')}>
+                      Unbatched
+                    </DropdownMenuItem>
                     {batches.map(batch => (
-                      <SelectItem key={batch.id} value={batch.id}>
-                        {batch.name}
-                      </SelectItem>
+                      <DropdownMenuItem key={batch.id} className="flex items-center justify-between p-0">
+                        <button 
+                          className="flex-1 text-left px-2 py-1.5"
+                          onClick={() => setSelectedBatchFilter(batch.id)}
+                        >
+                          {batch.name}
+                        </button>
+                        <button
+                          className="p-1.5 hover:bg-muted rounded mr-1"
+                          onClick={(e) => openBatchRename(batch, e)}
+                        >
+                          <Pencil className="h-3 w-3 text-muted-foreground hover:text-foreground" />
+                        </button>
+                      </DropdownMenuItem>
                     ))}
-                  </SelectContent>
-                </Select>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
 
               <Button
@@ -909,8 +1009,18 @@ export default function InstagramManage() {
                 placeholder="Search by username..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full sm:w-[300px]"
+                className="w-[180px]"
               />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDownloadCSV}
+                disabled={selectedAccounts.size === 0}
+                className="gap-1.5"
+              >
+                <Download className="h-4 w-4" />
+                Download
+              </Button>
               {searchQuery && (
                 <span className="text-sm text-muted-foreground whitespace-nowrap">
                   {filteredAccounts.length} results
@@ -1424,6 +1534,46 @@ export default function InstagramManage() {
                   </>
                 ) : (
                   'Update Bio'
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Batch Rename Dialog */}
+        <Dialog open={renameModalOpen} onOpenChange={setRenameModalOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Pencil className="h-5 w-5 text-primary" />
+                Rename Batch
+              </DialogTitle>
+              <DialogDescription>
+                Enter a new name for the batch
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="batch-rename">Batch Name</Label>
+                <Input
+                  id="batch-rename"
+                  placeholder="Enter batch name..."
+                  value={newBatchNameRename}
+                  onChange={(e) => setNewBatchNameRename(e.target.value)}
+                />
+              </div>
+              <Button 
+                onClick={handleRenameBatch} 
+                disabled={savingRename || !newBatchNameRename.trim()}
+                className="w-full"
+              >
+                {savingRename ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  'Save Changes'
                 )}
               </Button>
             </div>
