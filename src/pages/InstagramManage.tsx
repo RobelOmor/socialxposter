@@ -694,108 +694,120 @@ export default function InstagramManage() {
         </div>
 
         {/* Accounts Table */}
-        <Card className="glass-card border-border/50">
-          <CardHeader>
-            <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                  <CardTitle className="text-lg">Connected Accounts</CardTitle>
-                  <CardDescription>
-                    {accounts.length} of {profile?.account_limit || 2} accounts used
-                  </CardDescription>
-                </div>
-                
-                {/* Batch Controls */}
-                <div className="flex items-center gap-3 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <Layers className="h-4 w-4 text-muted-foreground" />
-                    <Select value={selectedBatchFilter} onValueChange={setSelectedBatchFilter}>
-                      <SelectTrigger className="w-[180px]">
-                        <SelectValue placeholder="Filter by batch" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-popover border-border">
-                        <SelectItem value="all">All Accounts</SelectItem>
-                        <SelectItem value="unbatched">Unbatched</SelectItem>
-                        {batches.map(batch => (
-                          <SelectItem key={batch.id} value={batch.id}>
-                            {batch.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (selectedAccounts.size === 0) {
-                        toast.error('Please select accounts first');
-                        return;
-                      }
-                      setBatchModalOpen(true);
-                    }}
-                    disabled={selectedAccounts.size === 0}
-                    className="gap-2"
-                  >
-                    <FolderPlus className="h-4 w-4" />
-                    Add to Batch ({selectedAccounts.size})
-                  </Button>
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleBulkRefresh}
-                    disabled={selectedAccounts.size === 0 || bulkRefreshing}
-                    className="gap-2"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${bulkRefreshing ? 'animate-spin' : ''}`} />
-                    Refresh ({selectedAccounts.size})
-                  </Button>
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (selectedAccounts.size === 0) {
-                        toast.error('Please select accounts first');
-                        return;
-                      }
-                      setDeleteConfirmOpen(true);
-                    }}
-                    disabled={selectedAccounts.size === 0}
-                    className="gap-2 text-destructive hover:text-destructive"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Remove ({selectedAccounts.size})
-                  </Button>
-
-                  <Button
-                    size="sm"
-                    onClick={openBulkPostDialog}
-                    disabled={selectedAccounts.size === 0}
-                    className="gap-2 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
-                  >
-                    <Send className="h-4 w-4" />
-                    Go Photo Post ({selectedAccounts.size})
-                  </Button>
-                </div>
+        <Card className="glass-card border-border/50 overflow-hidden">
+          <CardHeader className="space-y-4 pb-4">
+            {/* Title Row */}
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              <div>
+                <CardTitle className="text-lg md:text-xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text">
+                  Connected Accounts
+                </CardTitle>
+                <CardDescription className="text-sm">
+                  {accounts.length} of {profile?.account_limit || 2} accounts used
+                </CardDescription>
               </div>
+              
+              {/* Filter */}
+              <div className="flex items-center gap-2">
+                <Layers className="h-4 w-4 text-muted-foreground hidden sm:block" />
+                <Select value={selectedBatchFilter} onValueChange={setSelectedBatchFilter}>
+                  <SelectTrigger className="w-full sm:w-[180px] rounded-xl">
+                    <SelectValue placeholder="Filter by batch" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-popover border-border">
+                    <SelectItem value="all">All Accounts</SelectItem>
+                    <SelectItem value="unbatched">Unbatched</SelectItem>
+                    {batches.map(batch => (
+                      <SelectItem key={batch.id} value={batch.id}>
+                        {batch.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
 
-              {/* Search Row */}
-              <div className="flex items-center gap-3">
+            {/* Action Buttons Row */}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (selectedAccounts.size === 0) {
+                    toast.error('Please select accounts first');
+                    return;
+                  }
+                  setBatchModalOpen(true);
+                }}
+                disabled={selectedAccounts.size === 0}
+                className="gap-1.5 rounded-xl text-xs sm:text-sm"
+              >
+                <FolderPlus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                <span className="hidden xs:inline">Add to</span> Batch ({selectedAccounts.size})
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleBulkRefresh}
+                disabled={selectedAccounts.size === 0 || bulkRefreshing}
+                className="gap-1.5 rounded-xl text-xs sm:text-sm"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${bulkRefreshing ? 'animate-spin' : ''}`} />
+                Refresh ({selectedAccounts.size})
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (selectedAccounts.size === 0) {
+                    toast.error('Please select accounts first');
+                    return;
+                  }
+                  setDeleteConfirmOpen(true);
+                }}
+                disabled={selectedAccounts.size === 0}
+                className="gap-1.5 rounded-xl text-xs sm:text-sm text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/10"
+              >
+                <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                Remove ({selectedAccounts.size})
+              </Button>
+
+              <Button
+                size="sm"
+                onClick={openBulkPostDialog}
+                disabled={selectedAccounts.size === 0}
+                className="gap-1.5 rounded-xl text-xs sm:text-sm bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 shadow-lg shadow-pink-500/25 text-white"
+              >
+                <Send className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                Go Photo Post ({selectedAccounts.size})
+              </Button>
+            </div>
+
+            {/* Search Row */}
+            <div className="flex items-center gap-3">
+              <div className="relative flex-1 sm:flex-initial sm:w-[300px]">
                 <Input
                   placeholder="Search by username..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full sm:w-[300px]"
+                  className="rounded-xl pr-10"
                 />
                 {searchQuery && (
-                  <span className="text-sm text-muted-foreground">
-                    {filteredAccounts.length} results
-                  </span>
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    ×
+                  </button>
                 )}
               </div>
+              {searchQuery && (
+                <span className="text-sm text-muted-foreground whitespace-nowrap">
+                  {filteredAccounts.length} results
+                </span>
+              )}
             </div>
           </CardHeader>
           <CardContent>
