@@ -108,21 +108,95 @@ serve(async (req) => {
       }
     );
 
-    if (!userInfoResponse.ok) {
-      console.error('Instagram API error:', userInfoResponse.status);
+    const responseText = await userInfoResponse.text();
+    console.log('Instagram API Response Status:', userInfoResponse.status);
+    console.log('Instagram API Response Body:', responseText);
+
+    let userInfo;
+    try {
+      userInfo = JSON.parse(responseText);
+    } catch (e) {
+      console.error('Failed to parse Instagram response:', e);
       return new Response(
-        JSON.stringify({ success: false, error: 'Invalid or expired session cookies' }),
+        JSON.stringify({ 
+          success: false, 
+          error: 'Invalid response from Instagram',
+          details: responseText.substring(0, 200)
+        }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const userInfo = await userInfoResponse.json();
+    // Check for suspended account
+    const isSuspended = userInfo.message === 'challenge_required' && 
+      userInfo.challenge?.url?.includes('instagram.com/accounts/suspended');
+    
+    if (isSuspended) {
+      console.log('Account is SUSPENDED');
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: 'Account is SUSPENDED by Instagram',
+          reason: 'suspended',
+          instagram_response: userInfo
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Check for challenge required (not suspended but needs verification)
+    if (userInfo.message === 'challenge_required') {
+      console.log('Challenge required:', userInfo.challenge?.url);
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: 'Account requires verification - please verify on Instagram app first',
+          reason: 'challenge_required',
+          instagram_response: userInfo
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Check for login required
+    if (userInfo.message === 'login_required' || userInfo.message === 'Please wait a few minutes before you try again.') {
+      console.log('Login required or rate limited');
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: userInfo.message === 'login_required' ? 'Session expired - cookies are invalid' : 'Rate limited - please try again later',
+          reason: userInfo.message === 'login_required' ? 'expired' : 'rate_limited',
+          instagram_response: userInfo
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Check for other errors
+    if (!userInfoResponse.ok || userInfo.status === 'fail') {
+      console.error('Instagram API error:', userInfoResponse.status, userInfo.message);
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: userInfo.message || 'Invalid or expired session cookies',
+          reason: 'api_error',
+          instagram_response: userInfo
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const igUser = userInfo.user;
 
     if (!igUser) {
       return new Response(
-        JSON.stringify({ success: false, error: 'Could not fetch Instagram user info' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ 
+          success: false, 
+          error: 'Could not fetch Instagram user info - invalid response',
+          reason: 'no_user_data',
+          instagram_response: userInfo
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 

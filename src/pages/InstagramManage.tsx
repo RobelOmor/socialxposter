@@ -172,15 +172,38 @@ export default function InstagramManage() {
 
       if (error) throw error;
 
+      console.log('=== Import Session Response ===');
+      console.log('Full Response:', JSON.stringify(data, null, 2));
+
       if (data.success) {
-        toast.success('Instagram account connected successfully!');
+        toast.success(`Account @${data.data?.username} connected successfully!`);
         setCookies('');
         setImportOpen(false);
         fetchAccounts();
+      } else if (data.duplicate) {
+        toast.error(`Account @${data.data?.username} is already connected`);
       } else {
-        toast.error(data.error || 'Failed to validate cookies');
+        // Show detailed error based on reason
+        const errorMsg = data.error || 'Failed to validate cookies';
+        const reason = data.reason;
+        
+        if (reason === 'suspended') {
+          toast.error(`🚫 ${errorMsg}`, { duration: 5000 });
+        } else if (reason === 'challenge_required') {
+          toast.error(`⚠️ ${errorMsg}`, { duration: 5000 });
+        } else if (reason === 'expired') {
+          toast.error(`❌ ${errorMsg}`, { duration: 5000 });
+        } else if (reason === 'rate_limited') {
+          toast.error(`⏳ ${errorMsg}`, { duration: 5000 });
+        } else {
+          toast.error(errorMsg);
+        }
+        
+        console.log('Error reason:', reason);
+        console.log('Instagram response:', data.instagram_response);
       }
     } catch (error: any) {
+      console.error('Import error:', error);
       toast.error(error.message || 'Failed to import session');
     }
 

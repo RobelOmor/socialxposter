@@ -22,6 +22,10 @@ interface ImportResult {
   insertedCount: number;
   duplicateCount: number;
   duplicates: string[];
+  suspendedCount: number;
+  expiredCount: number;
+  errorCount: number;
+  errors: Array<{ cookie: string; reason: string; error: string }>;
 }
 
 export function BulkImportDialog({ 
@@ -157,45 +161,66 @@ export function BulkImportDialog({
     
     const previousCount = currentAccountCount;
     const duplicates: string[] = [];
+    const errors: Array<{ cookie: string; reason: string; error: string }> = [];
     let insertedCount = 0;
+    let suspendedCount = 0;
+    let expiredCount = 0;
     const chunkSize = 5;
     const totalChunks = Math.ceil(cookies.length / chunkSize);
 
     for (let i = 0; i < cookies.length; i += chunkSize) {
       const chunk = cookies.slice(i, i + chunkSize);
       
-        const results = await Promise.allSettled(
-          chunk.map(async (cookie) => {
-            try {
-              const { data, error } = await supabase.functions.invoke('import-instagram-session', {
-                body: { cookies: cookie }
-              });
-              
-              if (error) throw error;
-              
-              if (data.success) {
-                return { success: true, cookie };
-              } else if (data.duplicate || data.error?.includes('already connected')) {
-                return { success: false, duplicate: true, cookie };
-              } else {
-                return { success: false, duplicate: false, cookie, error: data.error };
-              }
-            } catch (err: unknown) {
-              const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-              if (errorMessage.includes('already') || errorMessage.includes('duplicate')) {
-                return { success: false, duplicate: true, cookie };
-              }
-              return { success: false, duplicate: false, cookie };
+      const results = await Promise.allSettled(
+        chunk.map(async (cookie) => {
+          try {
+            const { data, error } = await supabase.functions.invoke('import-instagram-session', {
+              body: { cookies: cookie }
+            });
+            
+            console.log('Bulk import response for cookie:', data);
+            
+            if (error) throw error;
+            
+            if (data.success) {
+              return { success: true, cookie, username: data.data?.username };
+            } else if (data.duplicate || data.error?.includes('already connected')) {
+              return { success: false, type: 'duplicate', cookie };
+            } else {
+              // Check reason for detailed categorization
+              const reason = data.reason || 'unknown';
+              return { 
+                success: false, 
+                type: reason,
+                cookie, 
+                error: data.error || 'Unknown error'
+              };
             }
-          })
-        );
+          } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            if (errorMessage.includes('already') || errorMessage.includes('duplicate')) {
+              return { success: false, type: 'duplicate', cookie };
+            }
+            return { success: false, type: 'error', cookie, error: errorMessage };
+          }
+        })
+      );
 
       results.forEach((result) => {
         if (result.status === 'fulfilled') {
-          if (result.value.success) {
+          const val = result.value;
+          if (val.success) {
             insertedCount++;
-          } else if (result.value.duplicate) {
-            duplicates.push(result.value.cookie);
+          } else if (val.type === 'duplicate') {
+            duplicates.push(val.cookie);
+          } else if (val.type === 'suspended') {
+            suspendedCount++;
+            errors.push({ cookie: val.cookie, reason: 'suspended', error: val.error || 'Account is SUSPENDED' });
+          } else if (val.type === 'expired' || val.type === 'login_required') {
+            expiredCount++;
+            errors.push({ cookie: val.cookie, reason: 'expired', error: val.error || 'Session expired' });
+          } else {
+            errors.push({ cookie: val.cookie, reason: val.type || 'error', error: val.error || 'Unknown error' });
           }
         }
       });
@@ -208,7 +233,11 @@ export function BulkImportDialog({
       previousCount,
       insertedCount,
       duplicateCount: duplicates.length,
-      duplicates
+      duplicates,
+      suspendedCount,
+      expiredCount,
+      errorCount: errors.length - suspendedCount - expiredCount,
+      errors
     });
     
     setIsProcessing(false);
@@ -216,6 +245,8 @@ export function BulkImportDialog({
     if (insertedCount > 0) {
       toast.success(`Successfully added ${insertedCount} accounts!`);
       onComplete();
+    } else if (errors.length > 0) {
+      toast.error(`All imports failed. Check results for details.`);
     }
   };
 
@@ -316,7 +347,7 @@ export function BulkImportDialog({
 
           {/* Results */}
           {result && (
-            <div className="bg-muted/50 rounded-lg p-4 space-y-2">
+            <div className="bg-muted/50 rounded-lg p-4 space-y-3">
               <div className="flex items-center gap-2 text-green-500">
                 <CheckCircle2 className="h-5 w-5" />
                 <span className="font-medium">Import Complete!</span>
@@ -324,8 +355,33 @@ export function BulkImportDialog({
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <p>Previous accounts: <span className="font-bold">{result.previousCount}</span></p>
                 <p>Newly added: <span className="font-bold text-green-500">{result.insertedCount}</span></p>
-                <p>Duplicates skipped: <span className="font-bold text-yellow-500">{result.duplicateCount}</span></p>
+                <p>Duplicates: <span className="font-bold text-yellow-500">{result.duplicateCount}</span></p>
+                {result.suspendedCount > 0 && (
+                  <p>🚫 Suspended: <span className="font-bold text-red-500">{result.suspendedCount}</span></p>
+                )}
+                {result.expiredCount > 0 && (
+                  <p>❌ Expired: <span className="font-bold text-orange-500">{result.expiredCount}</span></p>
+                )}
+                {result.errorCount > 0 && (
+                  <p>⚠️ Other errors: <span className="font-bold text-muted-foreground">{result.errorCount}</span></p>
+                )}
               </div>
+              
+              {/* Error details */}
+              {result.errors.length > 0 && (
+                <div className="mt-2 max-h-32 overflow-y-auto text-xs space-y-1 border-t pt-2">
+                  <p className="font-medium text-muted-foreground">Error Details:</p>
+                  {result.errors.slice(0, 10).map((err, idx) => (
+                    <p key={idx} className={`truncate ${err.reason === 'suspended' ? 'text-red-400' : err.reason === 'expired' ? 'text-orange-400' : 'text-muted-foreground'}`}>
+                      • {err.reason}: {err.error}
+                    </p>
+                  ))}
+                  {result.errors.length > 10 && (
+                    <p className="text-muted-foreground">...and {result.errors.length - 10} more</p>
+                  )}
+                </div>
+              )}
+              
               {result.duplicateCount > 0 && (
                 <Button 
                   variant="outline" 
