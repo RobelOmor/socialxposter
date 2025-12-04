@@ -696,15 +696,16 @@ export default function InstagramManage() {
         {/* Accounts Table */}
         <Card className="glass-card border-border/50">
           <CardHeader className="pb-4">
-            {/* Title Row - Title left, Filter right */}
-            <div className="flex items-start sm:items-center justify-between gap-4 mb-4">
-              <div>
-                <CardTitle className="text-lg md:text-xl font-bold">Connected Accounts</CardTitle>
-                <CardDescription className="text-sm">
-                  {accounts.length} of {profile?.account_limit || 2} accounts used
-                </CardDescription>
-              </div>
-              
+            {/* Title Row */}
+            <div className="mb-4">
+              <CardTitle className="text-lg md:text-xl font-bold">Connected Accounts</CardTitle>
+              <CardDescription className="text-sm">
+                {accounts.length} of {profile?.account_limit || 2} accounts used
+              </CardDescription>
+            </div>
+
+            {/* Action Buttons Row - Filter first, then buttons */}
+            <div className="flex flex-wrap items-center gap-2 mb-4">
               <div className="flex items-center gap-2">
                 <Layers className="h-4 w-4 text-muted-foreground" />
                 <Select value={selectedBatchFilter} onValueChange={setSelectedBatchFilter}>
@@ -722,10 +723,7 @@ export default function InstagramManage() {
                   </SelectContent>
                 </Select>
               </div>
-            </div>
 
-            {/* Action Buttons Row */}
-            <div className="flex flex-wrap items-center gap-2 mb-4">
               <Button
                 variant="outline"
                 size="sm"
