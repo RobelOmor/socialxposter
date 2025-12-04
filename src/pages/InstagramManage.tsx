@@ -92,15 +92,19 @@ export default function InstagramManage() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   useEffect(() => {
-    fetchAccounts();
-    fetchBatches();
-  }, []);
+    if (user) {
+      fetchAccounts();
+      fetchBatches();
+    }
+  }, [user]);
 
   const fetchAccounts = async () => {
+    if (!user) return;
     setLoading(true);
     const { data, error } = await supabase
       .from('instagram_accounts')
       .select('*')
+      .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -112,9 +116,11 @@ export default function InstagramManage() {
   };
 
   const fetchBatches = async () => {
+    if (!user) return;
     const { data, error } = await supabase
       .from('account_batches')
       .select('*')
+      .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
     if (!error && data) {
