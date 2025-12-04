@@ -32,8 +32,18 @@ import {
   FileSpreadsheet,
   Sparkles,
   FolderPlus,
-  Layers
+  Layers,
+  Send,
+  Image as ImageIcon
 } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
+
+interface PhotoServiceCategory {
+  id: string;
+  name: string;
+  status: string;
+  photo_count: number;
+}
 
 interface InstagramAccount {
   id: string;
@@ -90,6 +100,19 @@ export default function InstagramManage() {
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkRefreshing, setBulkRefreshing] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  
+  // Bulk photo post state
+  const [bulkPostOpen, setBulkPostOpen] = useState(false);
+  const [photoCategories, setPhotoCategories] = useState<PhotoServiceCategory[]>([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>('');
+  const [bulkPosting, setBulkPosting] = useState(false);
+  const [bulkPostProgress, setBulkPostProgress] = useState(0);
+  const [bulkPostReport, setBulkPostReport] = useState<{
+    success: number;
+    failed: number;
+    total: number;
+    details: { username: string; status: 'success' | 'failed'; error?: string }[];
+  } | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -405,6 +428,135 @@ export default function InstagramManage() {
     fetchAccounts();
   };
 
+  // Fetch photo service categories
+  const fetchPhotoCategories = async () => {
+    const { data } = await supabase
+      .from('photo_service_categories')
+      .select('*')
+      .eq('status', 'available')
+      .order('created_at', { ascending: false });
+    
+    if (data) {
+      setPhotoCategories(data as PhotoServiceCategory[]);
+    }
+  };
+
+  // Open bulk post dialog
+  const openBulkPostDialog = () => {
+    if (selectedAccounts.size === 0) {
+      toast.error('Please select accounts first');
+      return;
+    }
+    fetchPhotoCategories();
+    setSelectedCategoryId('');
+    setBulkPostReport(null);
+    setBulkPostProgress(0);
+    setBulkPostOpen(true);
+  };
+
+  // Handle bulk photo post
+  const handleBulkPhotoPost = async () => {
+    if (!selectedCategoryId) {
+      toast.error('Please select a photo service category');
+      return;
+    }
+
+    if (selectedAccounts.size === 0) {
+      toast.error('No accounts selected');
+      return;
+    }
+
+    setBulkPosting(true);
+    setBulkPostProgress(0);
+    setBulkPostReport(null);
+
+    const selectedAccountsList = accounts.filter(a => selectedAccounts.has(a.id) && a.status === 'active');
+    const totalAccounts = selectedAccountsList.length;
+    
+    if (totalAccounts === 0) {
+      toast.error('No active accounts selected');
+      setBulkPosting(false);
+      return;
+    }
+
+    // Get unique photo URLs from the selected category (one per account)
+    const { data: photoItems, error: photoError } = await supabase
+      .from('photo_service_items')
+      .select('id, photo_url')
+      .eq('category_id', selectedCategoryId)
+      .limit(totalAccounts);
+
+    if (photoError || !photoItems || photoItems.length === 0) {
+      toast.error('No photos available in this category');
+      setBulkPosting(false);
+      return;
+    }
+
+    if (photoItems.length < totalAccounts) {
+      toast.warning(`Only ${photoItems.length} photos available. Some accounts won't receive photos.`);
+    }
+
+    const details: { username: string; status: 'success' | 'failed'; error?: string }[] = [];
+    let successCount = 0;
+    let failedCount = 0;
+
+    // Post to each account with a unique photo
+    for (let i = 0; i < Math.min(selectedAccountsList.length, photoItems.length); i++) {
+      const account = selectedAccountsList[i];
+      const photoUrl = photoItems[i].photo_url;
+
+      try {
+        const { data, error } = await supabase.functions.invoke('instagram-post-photo', {
+          body: { 
+            accountId: account.id,
+            imageUrl: photoUrl
+          }
+        });
+
+        if (error || !data.success) {
+          failedCount++;
+          details.push({ 
+            username: account.username, 
+            status: 'failed', 
+            error: data?.error || error?.message || 'Unknown error' 
+          });
+        } else {
+          successCount++;
+          details.push({ username: account.username, status: 'success' });
+          
+          // Delete used photo from the category
+          await supabase
+            .from('photo_service_items')
+            .delete()
+            .eq('id', photoItems[i].id);
+        }
+      } catch (err: any) {
+        failedCount++;
+        details.push({ 
+          username: account.username, 
+          status: 'failed', 
+          error: err.message || 'Unknown error' 
+        });
+      }
+
+      setBulkPostProgress(Math.round(((i + 1) / Math.min(selectedAccountsList.length, photoItems.length)) * 100));
+    }
+
+    // Set report
+    setBulkPostReport({
+      success: successCount,
+      failed: failedCount,
+      total: Math.min(selectedAccountsList.length, photoItems.length),
+      details
+    });
+
+    // Refresh accounts to show updated post counts
+    await fetchAccounts();
+    
+    setBulkPosting(false);
+    toast.success(`Bulk post complete: ${successCount} success, ${failedCount} failed`);
+  };
+
   // Filter accounts based on selected batch
   const filteredAccounts = accounts.filter(account => {
     if (selectedBatchFilter === 'all') return true;
@@ -563,6 +715,16 @@ export default function InstagramManage() {
                 >
                   <Trash2 className="h-4 w-4" />
                   Remove ({selectedAccounts.size})
+                </Button>
+
+                <Button
+                  size="sm"
+                  onClick={openBulkPostDialog}
+                  disabled={selectedAccounts.size === 0}
+                  className="gap-2 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
+                >
+                  <Send className="h-4 w-4" />
+                  Go Photo Post ({selectedAccounts.size})
                 </Button>
               </div>
             </div>
@@ -884,6 +1046,132 @@ export default function InstagramManage() {
                   'Post to Instagram'
                 )}
               </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Bulk Photo Post Dialog */}
+        <Dialog open={bulkPostOpen} onOpenChange={(open) => {
+          if (!bulkPosting) setBulkPostOpen(open);
+        }}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Send className="h-5 w-5 text-pink-500" />
+                Bulk Photo Post
+              </DialogTitle>
+              <DialogDescription>
+                Post photos to {selectedAccounts.size} selected account(s) using unique photos from a photo service
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              {!bulkPostReport ? (
+                <>
+                  <div className="space-y-2">
+                    <Label>Select Photo Service Category</Label>
+                    {photoCategories.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No available photo services found</p>
+                    ) : (
+                      <Select value={selectedCategoryId} onValueChange={setSelectedCategoryId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Choose a category..." />
+                        </SelectTrigger>
+                        <SelectContent className="bg-popover border-border">
+                          {photoCategories.map(cat => (
+                            <SelectItem key={cat.id} value={cat.id}>
+                              <div className="flex items-center gap-2">
+                                <ImageIcon className="h-4 w-4" />
+                                <span>{cat.name}</span>
+                                <span className="text-muted-foreground">({cat.photo_count} photos)</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+
+                  {bulkPosting && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span>Posting to accounts...</span>
+                        <span>{bulkPostProgress}%</span>
+                      </div>
+                      <Progress value={bulkPostProgress} className="h-2" />
+                    </div>
+                  )}
+
+                  <Button 
+                    onClick={handleBulkPhotoPost}
+                    disabled={bulkPosting || !selectedCategoryId}
+                    className="w-full bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
+                  >
+                    {bulkPosting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Posting...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="h-4 w-4 mr-2" />
+                        Start Go
+                      </>
+                    )}
+                  </Button>
+                </>
+              ) : (
+                <div className="space-y-4">
+                  {/* Report Summary */}
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="text-center p-3 bg-muted/50 rounded-lg">
+                      <p className="text-2xl font-bold text-foreground">{bulkPostReport.total}</p>
+                      <p className="text-xs text-muted-foreground">Total</p>
+                    </div>
+                    <div className="text-center p-3 bg-green-500/10 rounded-lg">
+                      <p className="text-2xl font-bold text-green-500">{bulkPostReport.success}</p>
+                      <p className="text-xs text-muted-foreground">Success</p>
+                    </div>
+                    <div className="text-center p-3 bg-red-500/10 rounded-lg">
+                      <p className="text-2xl font-bold text-red-500">{bulkPostReport.failed}</p>
+                      <p className="text-xs text-muted-foreground">Failed</p>
+                    </div>
+                  </div>
+
+                  {/* Details */}
+                  <div className="max-h-48 overflow-y-auto space-y-2">
+                    {bulkPostReport.details.map((detail, idx) => (
+                      <div 
+                        key={idx}
+                        className={`flex items-center justify-between p-2 rounded-lg text-sm ${
+                          detail.status === 'success' ? 'bg-green-500/10' : 'bg-red-500/10'
+                        }`}
+                      >
+                        <span className="font-medium">@{detail.username}</span>
+                        <div className="flex items-center gap-2">
+                          {detail.status === 'success' ? (
+                            <CheckCircle2 className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <>
+                              <span className="text-xs text-red-400 max-w-32 truncate">{detail.error}</span>
+                              <XCircle className="h-4 w-4 text-red-500" />
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <Button 
+                    onClick={() => {
+                      setBulkPostOpen(false);
+                      setSelectedAccounts(new Set());
+                    }}
+                    className="w-full"
+                  >
+                    Done
+                  </Button>
+                </div>
+              )}
             </div>
           </DialogContent>
         </Dialog>
