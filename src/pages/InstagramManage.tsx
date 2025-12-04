@@ -421,6 +421,8 @@ export default function InstagramManage() {
     const selectedArray = Array.from(selectedAccounts);
     let successCount = 0;
     let failCount = 0;
+    let suspendCount = 0;
+    const newSuspendedAccounts = new Set(suspendedAccounts);
 
     toast.loading(`Refreshing ${selectedArray.length} accounts...`, { id: 'bulk-refresh' });
 
@@ -434,13 +436,26 @@ export default function InstagramManage() {
           failCount++;
         } else {
           successCount++;
+          
+          // Check if account is suspended
+          if (data.instagram_response?.is_suspended) {
+            newSuspendedAccounts.add(accountId);
+            suspendCount++;
+          } else {
+            newSuspendedAccounts.delete(accountId);
+          }
         }
       } catch {
         failCount++;
       }
     }
 
-    if (failCount === 0) {
+    // Update suspended accounts set
+    setSuspendedAccounts(newSuspendedAccounts);
+
+    if (suspendCount > 0) {
+      toast.error(`${suspendCount} account(s) SUSPENDED!`, { id: 'bulk-refresh' });
+    } else if (failCount === 0) {
       toast.success(`${successCount} account(s) refreshed successfully`, { id: 'bulk-refresh' });
     } else {
       toast.warning(`${successCount} refreshed, ${failCount} failed`, { id: 'bulk-refresh' });
