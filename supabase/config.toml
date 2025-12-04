@@ -1,1 +1,10 @@
 project_id = "iilyhckcapcsoidabspp"
+
+[functions.import-instagram-session]
+verify_jwt = true
+
+[functions.instagram-session-action]
+verify_jwt = true
+
+[functions.instagram-post-photo]
+verify_jwt = true

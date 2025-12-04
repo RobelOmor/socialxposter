@@ -133,6 +133,49 @@ export type Database = {
         }
         Relationships: []
       }
+      subscription_history: {
+        Row: {
+          admin_id: string
+          created_at: string
+          expire_at: string | null
+          id: string
+          new_limit: number | null
+          new_plan: Database["public"]["Enums"]["subscription_plan"]
+          notes: string | null
+          previous_limit: number | null
+          previous_plan: Database["public"]["Enums"]["subscription_plan"] | null
+          user_id: string
+        }
+        Insert: {
+          admin_id: string
+          created_at?: string
+          expire_at?: string | null
+          id?: string
+          new_limit?: number | null
+          new_plan: Database["public"]["Enums"]["subscription_plan"]
+          notes?: string | null
+          previous_limit?: number | null
+          previous_plan?:
+            | Database["public"]["Enums"]["subscription_plan"]
+            | null
+          user_id: string
+        }
+        Update: {
+          admin_id?: string
+          created_at?: string
+          expire_at?: string | null
+          id?: string
+          new_limit?: number | null
+          new_plan?: Database["public"]["Enums"]["subscription_plan"]
+          notes?: string | null
+          previous_limit?: number | null
+          previous_plan?:
+            | Database["public"]["Enums"]["subscription_plan"]
+            | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string

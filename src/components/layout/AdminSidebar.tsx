@@ -8,7 +8,8 @@ import {
   LogOut,
   ChevronDown,
   Zap,
-  Home
+  Home,
+  Package
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -28,6 +29,7 @@ export function AdminSidebar() {
     { icon: Users, label: 'Users', path: '/admin/users' },
     { icon: Instagram, label: 'Instagram Accounts', path: '/admin/instagram-accounts' },
     { icon: Shield, label: 'Roles', path: '/admin/roles' },
+    { icon: Package, label: 'Packages', path: '/admin/packages' },
   ];
 
   return (
