@@ -86,6 +86,9 @@ export default function InstagramManage() {
   const [batchModalOpen, setBatchModalOpen] = useState(false);
   const [newBatchName, setNewBatchName] = useState('');
   const [creatingBatch, setCreatingBatch] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkRefreshing, setBulkRefreshing] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   useEffect(() => {
     fetchAccounts();
@@ -329,6 +332,72 @@ export default function InstagramManage() {
     setCreatingBatch(false);
   };
 
+  // Bulk delete selected accounts
+  const handleBulkDelete = async () => {
+    if (selectedAccounts.size === 0) return;
+
+    setBulkDeleting(true);
+
+    try {
+      const { error } = await supabase
+        .from('instagram_accounts')
+        .delete()
+        .in('id', Array.from(selectedAccounts));
+
+      if (error) throw error;
+
+      toast.success(`${selectedAccounts.size} account(s) removed successfully`);
+      setSelectedAccounts(new Set());
+      setDeleteConfirmOpen(false);
+      fetchAccounts();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete accounts');
+    }
+
+    setBulkDeleting(false);
+  };
+
+  // Bulk refresh selected accounts
+  const handleBulkRefresh = async () => {
+    if (selectedAccounts.size === 0) {
+      toast.error('Please select accounts first');
+      return;
+    }
+
+    setBulkRefreshing(true);
+    const selectedArray = Array.from(selectedAccounts);
+    let successCount = 0;
+    let failCount = 0;
+
+    toast.loading(`Refreshing ${selectedArray.length} accounts...`, { id: 'bulk-refresh' });
+
+    for (const accountId of selectedArray) {
+      try {
+        const { data, error } = await supabase.functions.invoke('instagram-session-action', {
+          body: { accountId, action: 'refresh' }
+        });
+
+        if (error || !data.success) {
+          failCount++;
+        } else {
+          successCount++;
+        }
+      } catch {
+        failCount++;
+      }
+    }
+
+    if (failCount === 0) {
+      toast.success(`${successCount} account(s) refreshed successfully`, { id: 'bulk-refresh' });
+    } else {
+      toast.warning(`${successCount} refreshed, ${failCount} failed`, { id: 'bulk-refresh' });
+    }
+
+    setSelectedAccounts(new Set());
+    setBulkRefreshing(false);
+    fetchAccounts();
+  };
+
   // Filter accounts based on selected batch
   const filteredAccounts = accounts.filter(account => {
     if (selectedBatchFilter === 'all') return true;
@@ -459,6 +528,34 @@ export default function InstagramManage() {
                 >
                   <FolderPlus className="h-4 w-4" />
                   Add to Batch ({selectedAccounts.size})
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleBulkRefresh}
+                  disabled={selectedAccounts.size === 0 || bulkRefreshing}
+                  className="gap-2"
+                >
+                  <RefreshCw className={`h-4 w-4 ${bulkRefreshing ? 'animate-spin' : ''}`} />
+                  Refresh ({selectedAccounts.size})
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (selectedAccounts.size === 0) {
+                      toast.error('Please select accounts first');
+                      return;
+                    }
+                    setDeleteConfirmOpen(true);
+                  }}
+                  disabled={selectedAccounts.size === 0}
+                  className="gap-2 text-destructive hover:text-destructive"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Remove ({selectedAccounts.size})
                 </Button>
               </div>
             </div>
@@ -631,6 +728,48 @@ export default function InstagramManage() {
                   </>
                 ) : (
                   'Confirm Batch Add'
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-destructive">
+                <Trash2 className="h-5 w-5" />
+                Confirm Removal
+              </DialogTitle>
+              <DialogDescription>
+                Are you sure you want to remove {selectedAccounts.size} account(s)? This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex gap-3 pt-4">
+              <Button
+                variant="outline"
+                onClick={() => setDeleteConfirmOpen(false)}
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleBulkDelete}
+                disabled={bulkDeleting}
+                className="flex-1"
+              >
+                {bulkDeleting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Removing...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Yes, Remove
+                  </>
                 )}
               </Button>
             </div>
