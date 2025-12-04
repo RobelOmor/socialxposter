@@ -94,6 +94,11 @@ serve(async (req) => {
     const csrfToken = cookieObj['csrftoken'];
 
     // Test/refresh session by fetching user info
+    console.log('=== Instagram Session Check START ===');
+    console.log('Account username:', account.username);
+    console.log('ds_user_id:', dsUserId);
+    console.log('csrftoken:', csrfToken ? 'present' : 'missing');
+    
     const userInfoResponse = await fetch(
       `https://i.instagram.com/api/v1/users/${dsUserId}/info/`,
       {
@@ -106,33 +111,54 @@ serve(async (req) => {
       }
     );
 
+    // Log raw response details
+    console.log('=== Instagram API Response ===');
+    console.log('HTTP Status:', userInfoResponse.status);
+    console.log('Status Text:', userInfoResponse.statusText);
+    
+    const responseText = await userInfoResponse.text();
+    console.log('Raw Response Body:', responseText);
+    
     let newStatus: 'active' | 'expired' = 'expired';
     let updateData: any = {
       last_checked: new Date().toISOString(),
     };
 
-    if (userInfoResponse.ok) {
-      const userInfo = await userInfoResponse.json();
-      const igUser = userInfo.user;
+    // Try to parse the response
+    let userInfo: any = null;
+    try {
+      userInfo = JSON.parse(responseText);
+      console.log('Parsed JSON:', JSON.stringify(userInfo, null, 2));
+    } catch (e) {
+      console.log('Failed to parse response as JSON');
+    }
 
-      if (igUser) {
-        newStatus = 'active';
-        updateData = {
-          ...updateData,
-          full_name: igUser.full_name,
-          profile_pic_url: igUser.profile_pic_url,
-          posts_count: igUser.media_count || 0,
-          followers_count: igUser.follower_count || 0,
-          following_count: igUser.following_count || 0,
-          bio: igUser.biography || '',
-          status: 'active',
-        };
-        console.log('Session is active, updated stats');
-      }
+    if (userInfoResponse.ok && userInfo?.user) {
+      const igUser = userInfo.user;
+      newStatus = 'active';
+      updateData = {
+        ...updateData,
+        full_name: igUser.full_name,
+        profile_pic_url: igUser.profile_pic_url,
+        posts_count: igUser.media_count || 0,
+        followers_count: igUser.follower_count || 0,
+        following_count: igUser.following_count || 0,
+        bio: igUser.biography || '',
+        status: 'active',
+      };
+      console.log('Session is ACTIVE');
     } else {
-      console.log('Session expired or invalid');
+      console.log('Session marked as EXPIRED');
+      console.log('Reason - Response OK:', userInfoResponse.ok, '| User exists:', !!userInfo?.user);
+      if (userInfo?.message) console.log('Instagram message:', userInfo.message);
+      if (userInfo?.status) console.log('Instagram status:', userInfo.status);
+      if (userInfo?.error_type) console.log('Error type:', userInfo.error_type);
+      if (userInfo?.spam) console.log('Spam flag:', userInfo.spam);
+      if (userInfo?.lock) console.log('Lock flag:', userInfo.lock);
+      if (userInfo?.checkpoint_url) console.log('Checkpoint URL:', userInfo.checkpoint_url);
       updateData.status = 'expired';
     }
+    console.log('=== Instagram Session Check END ===')
 
     // Update account
     const { error: updateError } = await supabaseClient
