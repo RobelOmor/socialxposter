@@ -158,6 +158,23 @@ serve(async (req) => {
       if (userInfo?.checkpoint_url) console.log('Checkpoint URL:', userInfo.checkpoint_url);
       updateData.status = 'expired';
     }
+    
+    // Build instagram_response object for frontend debugging
+    let instagramResponse: any = {
+      http_status: userInfoResponse.status,
+      http_status_text: userInfoResponse.statusText,
+    };
+    
+    if (userInfo) {
+      instagramResponse.message = userInfo.message;
+      instagramResponse.status = userInfo.status;
+      instagramResponse.error_type = userInfo.error_type;
+      instagramResponse.spam = userInfo.spam;
+      instagramResponse.lock = userInfo.lock;
+      instagramResponse.checkpoint_url = userInfo.checkpoint_url;
+      instagramResponse.challenge = userInfo.challenge;
+    }
+    
     console.log('=== Instagram Session Check END ===')
 
     // Update account
@@ -178,7 +195,8 @@ serve(async (req) => {
       JSON.stringify({ 
         success: true, 
         status: newStatus,
-        data: updateData
+        data: updateData,
+        instagram_response: instagramResponse
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
