@@ -124,6 +124,7 @@ serve(async (req) => {
           posts_count: igUser.media_count || 0,
           followers_count: igUser.follower_count || 0,
           following_count: igUser.following_count || 0,
+          bio: igUser.biography || '',
           status: 'active',
         };
         console.log('Session is active, updated stats');

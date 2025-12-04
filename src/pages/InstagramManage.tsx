@@ -47,6 +47,7 @@ interface InstagramAccount {
   cookies: string;
   created_at: string | null;
   batch_id: string | null;
+  bio: string | null;
 }
 
 interface AccountBatch {
@@ -589,10 +590,13 @@ export default function InstagramManage() {
                         />
                       </TableHead>
                       <TableHead className="w-12">#</TableHead>
+                      <TableHead className="w-16">Photo</TableHead>
                       <TableHead>Account</TableHead>
                       <TableHead className="text-center">Posts</TableHead>
                       <TableHead className="text-center">Followers</TableHead>
                       <TableHead className="text-center">Following</TableHead>
+                      <TableHead>Bio</TableHead>
+                      <TableHead className="text-center">Created</TableHead>
                       <TableHead className="text-center">Status</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
@@ -608,22 +612,38 @@ export default function InstagramManage() {
                         </TableCell>
                         <TableCell className="font-medium">{index + 1}</TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-10 w-10 border border-border">
-                              <AvatarImage src={account.profile_pic_url || ''} />
-                              <AvatarFallback className="bg-pink-500/10 text-pink-500">
-                                {account.username?.[0]?.toUpperCase() || 'I'}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <p className="font-medium text-foreground">@{account.username}</p>
-                              <p className="text-sm text-muted-foreground">{account.full_name}</p>
-                            </div>
+                          <Avatar className="h-12 w-12 border border-border">
+                            <AvatarImage src={account.profile_pic_url || ''} />
+                            <AvatarFallback className="bg-pink-500/10 text-pink-500">
+                              {account.username?.[0]?.toUpperCase() || 'I'}
+                            </AvatarFallback>
+                          </Avatar>
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium text-foreground">@{account.username}</p>
+                            <p className="text-sm text-muted-foreground">{account.full_name}</p>
                           </div>
                         </TableCell>
                         <TableCell className="text-center">{account.posts_count.toLocaleString()}</TableCell>
                         <TableCell className="text-center">{account.followers_count.toLocaleString()}</TableCell>
                         <TableCell className="text-center">{account.following_count.toLocaleString()}</TableCell>
+                        <TableCell className="max-w-48">
+                          <p className="text-sm text-muted-foreground truncate" title={account.bio || ''}>
+                            {account.bio || '-'}
+                          </p>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="text-sm text-muted-foreground">
+                            {account.created_at 
+                              ? new Date(account.created_at).toLocaleDateString('en-US', { 
+                                  year: 'numeric', 
+                                  month: 'short', 
+                                  day: 'numeric' 
+                                })
+                              : '-'}
+                          </span>
+                        </TableCell>
                         <TableCell className="text-center">
                           <div className="flex items-center justify-center gap-2">
                             <Badge 
@@ -637,14 +657,10 @@ export default function InstagramManage() {
                               )}
                               {account.status}
                             </Badge>
-                            {isToday(account.created_at) ? (
+                            {isToday(account.created_at) && (
                               <Badge className="bg-purple-500/20 text-purple-400 hover:bg-purple-500/30">
                                 <Sparkles className="h-3 w-3 mr-1" />
                                 New
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-muted-foreground">
-                                Regular
                               </Badge>
                             )}
                           </div>

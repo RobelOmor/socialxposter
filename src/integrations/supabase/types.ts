@@ -41,6 +41,7 @@ export type Database = {
       instagram_accounts: {
         Row: {
           batch_id: string | null
+          bio: string | null
           cookies: string
           created_at: string | null
           followers_count: number | null
@@ -57,6 +58,7 @@ export type Database = {
         }
         Insert: {
           batch_id?: string | null
+          bio?: string | null
           cookies: string
           created_at?: string | null
           followers_count?: number | null
@@ -73,6 +75,7 @@ export type Database = {
         }
         Update: {
           batch_id?: string | null
+          bio?: string | null
           cookies?: string
           created_at?: string | null
           followers_count?: number | null
