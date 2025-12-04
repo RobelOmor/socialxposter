@@ -953,7 +953,7 @@ export default function InstagramManage() {
                       <TableHead className="text-center">Followers</TableHead>
                       <TableHead className="text-center">Following</TableHead>
                       <TableHead>Bio</TableHead>
-                      <TableHead className="text-center">Created</TableHead>
+                      <TableHead className="text-center">Submitted</TableHead>
                       <TableHead className="text-center">Status</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
