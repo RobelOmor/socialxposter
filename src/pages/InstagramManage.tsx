@@ -454,7 +454,7 @@ export default function InstagramManage() {
     setBulkPostOpen(true);
   };
 
-  // Handle bulk photo post
+  // Handle bulk photo post with concurrent processing
   const handleBulkPhotoPost = async () => {
     if (!selectedCategoryId) {
       toast.error('Please select a photo service category');
@@ -499,54 +499,96 @@ export default function InstagramManage() {
     const details: { username: string; status: 'success' | 'failed'; error?: string }[] = [];
     let successCount = 0;
     let failedCount = 0;
+    let completedCount = 0;
 
-    // Post to each account with a unique photo
-    for (let i = 0; i < Math.min(selectedAccountsList.length, photoItems.length); i++) {
-      const account = selectedAccountsList[i];
-      const photoUrl = photoItems[i].photo_url;
+    const totalToProcess = Math.min(selectedAccountsList.length, photoItems.length);
+    const CONCURRENT_THREADS = 10; // Number of parallel requests
 
+    // Create account-photo pairs
+    const tasks = selectedAccountsList.slice(0, totalToProcess).map((account, index) => ({
+      account,
+      photoItem: photoItems[index]
+    }));
+
+    // Process a single task
+    const processTask = async (task: { account: InstagramAccount; photoItem: { id: string; photo_url: string } }) => {
+      const { account, photoItem } = task;
+      
       try {
         const { data, error } = await supabase.functions.invoke('instagram-post-photo', {
           body: { 
             accountId: account.id,
-            imageUrl: photoUrl
+            imageUrl: photoItem.photo_url
           }
         });
 
         if (error || !data.success) {
-          failedCount++;
-          details.push({ 
+          return { 
             username: account.username, 
-            status: 'failed', 
-            error: data?.error || error?.message || 'Unknown error' 
-          });
+            status: 'failed' as const, 
+            error: data?.error || error?.message || 'Unknown error',
+            photoItemId: null
+          };
         } else {
-          successCount++;
-          details.push({ username: account.username, status: 'success' });
-          
-          // Delete used photo from the category
-          await supabase
-            .from('photo_service_items')
-            .delete()
-            .eq('id', photoItems[i].id);
+          return { 
+            username: account.username, 
+            status: 'success' as const,
+            photoItemId: photoItem.id
+          };
         }
       } catch (err: any) {
-        failedCount++;
-        details.push({ 
+        return { 
           username: account.username, 
-          status: 'failed', 
-          error: err.message || 'Unknown error' 
+          status: 'failed' as const, 
+          error: err.message || 'Unknown error',
+          photoItemId: null
+        };
+      }
+    };
+
+    // Process tasks in batches concurrently
+    for (let i = 0; i < tasks.length; i += CONCURRENT_THREADS) {
+      const batch = tasks.slice(i, i + CONCURRENT_THREADS);
+      
+      // Execute batch in parallel
+      const results = await Promise.all(batch.map(processTask));
+      
+      // Process results
+      const successPhotoIds: string[] = [];
+      
+      for (const result of results) {
+        completedCount++;
+        if (result.status === 'success') {
+          successCount++;
+          if (result.photoItemId) {
+            successPhotoIds.push(result.photoItemId);
+          }
+        } else {
+          failedCount++;
+        }
+        details.push({ 
+          username: result.username, 
+          status: result.status, 
+          error: result.error 
         });
       }
+      
+      // Bulk delete used photos
+      if (successPhotoIds.length > 0) {
+        await supabase
+          .from('photo_service_items')
+          .delete()
+          .in('id', successPhotoIds);
+      }
 
-      setBulkPostProgress(Math.round(((i + 1) / Math.min(selectedAccountsList.length, photoItems.length)) * 100));
+      setBulkPostProgress(Math.round((completedCount / totalToProcess) * 100));
     }
 
     // Set report
     setBulkPostReport({
       success: successCount,
       failed: failedCount,
-      total: Math.min(selectedAccountsList.length, photoItems.length),
+      total: totalToProcess,
       details
     });
 
