@@ -14,8 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      account_batches: {
+        Row: {
+          created_at: string | null
+          id: string
+          name: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          name: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          name?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       instagram_accounts: {
         Row: {
+          batch_id: string | null
           cookies: string
           created_at: string | null
           followers_count: number | null
@@ -31,6 +56,7 @@ export type Database = {
           username: string
         }
         Insert: {
+          batch_id?: string | null
           cookies: string
           created_at?: string | null
           followers_count?: number | null
@@ -46,6 +72,7 @@ export type Database = {
           username: string
         }
         Update: {
+          batch_id?: string | null
           cookies?: string
           created_at?: string | null
           followers_count?: number | null
@@ -60,7 +87,15 @@ export type Database = {
           user_id?: string
           username?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "instagram_accounts_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "account_batches"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
