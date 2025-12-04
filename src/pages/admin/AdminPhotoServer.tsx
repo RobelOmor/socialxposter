@@ -192,7 +192,7 @@ export default function AdminPhotoServer() {
     const previousCount = selectedCategory.photo_count;
     const duplicates: string[] = [];
     let insertedCount = 0;
-    const chunkSize = 50;
+    const chunkSize = 100;
     const totalChunks = Math.ceil(photoUrls.length / chunkSize);
 
     try {
