@@ -5,12 +5,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -28,7 +30,9 @@ import {
   XCircle,
   ChevronDown,
   FileSpreadsheet,
-  Sparkles
+  Sparkles,
+  FolderPlus,
+  Layers
 } from 'lucide-react';
 
 interface InstagramAccount {
@@ -42,6 +46,14 @@ interface InstagramAccount {
   status: 'active' | 'expired' | 'pending';
   cookies: string;
   created_at: string | null;
+  batch_id: string | null;
+}
+
+interface AccountBatch {
+  id: string;
+  name: string;
+  user_id: string;
+  created_at: string | null;
 }
 
 const isToday = (dateString: string | null): boolean => {
@@ -54,6 +66,7 @@ const isToday = (dateString: string | null): boolean => {
 export default function InstagramManage() {
   const { user, profile } = useAuth();
   const [accounts, setAccounts] = useState<InstagramAccount[]>([]);
+  const [batches, setBatches] = useState<AccountBatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
   const [postOpen, setPostOpen] = useState(false);
@@ -66,9 +79,17 @@ export default function InstagramManage() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState('');
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  
+  // Batch management state
+  const [selectedBatchFilter, setSelectedBatchFilter] = useState<string>('unbatched');
+  const [selectedAccounts, setSelectedAccounts] = useState<Set<string>>(new Set());
+  const [batchModalOpen, setBatchModalOpen] = useState(false);
+  const [newBatchName, setNewBatchName] = useState('');
+  const [creatingBatch, setCreatingBatch] = useState(false);
 
   useEffect(() => {
     fetchAccounts();
+    fetchBatches();
   }, []);
 
   const fetchAccounts = async () => {
@@ -86,13 +107,23 @@ export default function InstagramManage() {
     setLoading(false);
   };
 
+  const fetchBatches = async () => {
+    const { data, error } = await supabase
+      .from('account_batches')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (!error && data) {
+      setBatches(data as AccountBatch[]);
+    }
+  };
+
   const handleImportCookies = async () => {
     if (!cookies.trim()) {
       toast.error('Please enter cookies');
       return;
     }
 
-    // account_limit null means unlimited (premium)
     if (profile && profile.account_limit !== null && accounts.length >= profile.account_limit) {
       toast.error(`Account limit reached (${profile.account_limit}). Upgrade to add more.`);
       return;
@@ -234,6 +265,77 @@ export default function InstagramManage() {
     setPostOpen(true);
   };
 
+  // Batch management functions
+  const handleSelectAccount = (accountId: string, checked: boolean) => {
+    const newSelected = new Set(selectedAccounts);
+    if (checked) {
+      newSelected.add(accountId);
+    } else {
+      newSelected.delete(accountId);
+    }
+    setSelectedAccounts(newSelected);
+  };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      const filteredAccountIds = filteredAccounts.map(a => a.id);
+      setSelectedAccounts(new Set(filteredAccountIds));
+    } else {
+      setSelectedAccounts(new Set());
+    }
+  };
+
+  const handleCreateBatch = async () => {
+    if (!newBatchName.trim()) {
+      toast.error('Please enter a batch name');
+      return;
+    }
+
+    if (selectedAccounts.size === 0) {
+      toast.error('Please select at least one account');
+      return;
+    }
+
+    setCreatingBatch(true);
+
+    try {
+      // Create the batch
+      const { data: batchData, error: batchError } = await supabase
+        .from('account_batches')
+        .insert({ name: newBatchName.trim(), user_id: user?.id })
+        .select()
+        .single();
+
+      if (batchError) throw batchError;
+
+      // Update selected accounts with the batch_id
+      const { error: updateError } = await supabase
+        .from('instagram_accounts')
+        .update({ batch_id: batchData.id })
+        .in('id', Array.from(selectedAccounts));
+
+      if (updateError) throw updateError;
+
+      toast.success(`Batch "${newBatchName}" created with ${selectedAccounts.size} accounts`);
+      setNewBatchName('');
+      setBatchModalOpen(false);
+      setSelectedAccounts(new Set());
+      fetchAccounts();
+      fetchBatches();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to create batch');
+    }
+
+    setCreatingBatch(false);
+  };
+
+  // Filter accounts based on selected batch
+  const filteredAccounts = accounts.filter(account => {
+    if (selectedBatchFilter === 'all') return true;
+    if (selectedBatchFilter === 'unbatched') return !account.batch_id;
+    return account.batch_id === selectedBatchFilter;
+  });
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -257,7 +359,7 @@ export default function InstagramManage() {
                 <ChevronDown className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent align="end" className="bg-popover border-border">
               <DropdownMenuItem onClick={() => setImportOpen(true)} className="gap-2">
                 <Plus className="h-4 w-4" />
                 Single Add Account
@@ -314,10 +416,52 @@ export default function InstagramManage() {
         {/* Accounts Table */}
         <Card className="glass-card border-border/50">
           <CardHeader>
-            <CardTitle className="text-lg">Connected Accounts</CardTitle>
-            <CardDescription>
-              {accounts.length} of {profile?.account_limit || 2} accounts used
-            </CardDescription>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <CardTitle className="text-lg">Connected Accounts</CardTitle>
+                <CardDescription>
+                  {accounts.length} of {profile?.account_limit || 2} accounts used
+                </CardDescription>
+              </div>
+              
+              {/* Batch Controls */}
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <Layers className="h-4 w-4 text-muted-foreground" />
+                  <Select value={selectedBatchFilter} onValueChange={setSelectedBatchFilter}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Filter by batch" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-popover border-border">
+                      <SelectItem value="all">All Accounts</SelectItem>
+                      <SelectItem value="unbatched">Unbatched</SelectItem>
+                      {batches.map(batch => (
+                        <SelectItem key={batch.id} value={batch.id}>
+                          {batch.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (selectedAccounts.size === 0) {
+                      toast.error('Please select accounts first');
+                      return;
+                    }
+                    setBatchModalOpen(true);
+                  }}
+                  disabled={selectedAccounts.size === 0}
+                  className="gap-2"
+                >
+                  <FolderPlus className="h-4 w-4" />
+                  Add to Batch ({selectedAccounts.size})
+                </Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -341,6 +485,12 @@ export default function InstagramManage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-12">
+                        <Checkbox
+                          checked={filteredAccounts.length > 0 && selectedAccounts.size === filteredAccounts.length}
+                          onCheckedChange={handleSelectAll}
+                        />
+                      </TableHead>
                       <TableHead className="w-12">#</TableHead>
                       <TableHead>Account</TableHead>
                       <TableHead className="text-center">Posts</TableHead>
@@ -351,8 +501,14 @@ export default function InstagramManage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {accounts.map((account, index) => (
+                    {filteredAccounts.map((account, index) => (
                       <TableRow key={account.id}>
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedAccounts.has(account.id)}
+                            onCheckedChange={(checked) => handleSelectAccount(account.id, checked as boolean)}
+                          />
+                        </TableCell>
                         <TableCell className="font-medium">{index + 1}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-3">
@@ -440,6 +596,46 @@ export default function InstagramManage() {
           accountLimit={profile?.account_limit ?? null}
           currentAccountCount={accounts.length}
         />
+
+        {/* Add to Batch Modal */}
+        <Dialog open={batchModalOpen} onOpenChange={setBatchModalOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FolderPlus className="h-5 w-5" />
+                Add to Batch
+              </DialogTitle>
+              <DialogDescription>
+                Create a new batch for {selectedAccounts.size} selected account(s)
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="batch-name">Enter Your Batch Name</Label>
+                <Input
+                  id="batch-name"
+                  placeholder="e.g., Marketing Accounts, Personal"
+                  value={newBatchName}
+                  onChange={(e) => setNewBatchName(e.target.value)}
+                />
+              </div>
+              <Button 
+                onClick={handleCreateBatch} 
+                disabled={creatingBatch || !newBatchName.trim()}
+                className="w-full"
+              >
+                {creatingBatch ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  'Confirm Batch Add'
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Post Dialog */}
         <Dialog open={postOpen} onOpenChange={setPostOpen}>
