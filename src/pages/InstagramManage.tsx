@@ -523,11 +523,19 @@ export default function InstagramManage() {
           }
         });
 
-        if (error || !data.success) {
+        // Debug: Log the full API response
+        console.log('=== Instagram Post Photo API Response ===');
+        console.log('Account:', account.username);
+        console.log('Photo URL:', photoItem.photo_url);
+        console.log('Response data:', JSON.stringify(data, null, 2));
+        console.log('Error:', error);
+        console.log('=========================================');
+
+        if (error || !data?.success) {
           return { 
             username: account.username, 
             status: 'failed' as const, 
-            error: data?.error || error?.message || 'Unknown error',
+            error: data?.error || data?.message || error?.message || 'Unknown error',
             photoItemId: null
           };
         } else {
@@ -538,6 +546,10 @@ export default function InstagramManage() {
           };
         }
       } catch (err: any) {
+        console.log('=== Instagram Post Photo CATCH Error ===');
+        console.log('Account:', account.username);
+        console.log('Error:', err);
+        console.log('=========================================');
         return { 
           username: account.username, 
           status: 'failed' as const, 
