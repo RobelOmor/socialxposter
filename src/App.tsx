@@ -12,6 +12,7 @@ import Admin from "./pages/Admin";
 import AdminUsers from "./pages/admin/AdminUsers";
 import AdminInstagramAccounts from "./pages/admin/AdminInstagramAccounts";
 import AdminRoles from "./pages/admin/AdminRoles";
+import AdminPackages from "./pages/admin/AdminPackages";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -64,6 +65,7 @@ function AppRoutes() {
       <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
       <Route path="/admin/instagram-accounts" element={<ProtectedRoute><AdminInstagramAccounts /></ProtectedRoute>} />
       <Route path="/admin/roles" element={<ProtectedRoute><AdminRoles /></ProtectedRoute>} />
+      <Route path="/admin/packages" element={<ProtectedRoute><AdminPackages /></ProtectedRoute>} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
