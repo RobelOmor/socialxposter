@@ -207,17 +207,17 @@ serve(async (req) => {
       }
     );
 
-    if (!configureResponse.ok) {
-      const errorText = await configureResponse.text();
-      console.error('Configure failed:', errorText);
-      return new Response(
-        JSON.stringify({ success: false, error: 'Failed to configure media' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
     const configureResult = await configureResponse.json();
     console.log('Configure result:', configureResult);
+
+    if (!configureResponse.ok || configureResult.status !== 'ok') {
+      const errorMessage = configureResult.message || 'Failed to configure media';
+      console.error('Configure failed:', JSON.stringify(configureResult));
+      return new Response(
+        JSON.stringify({ success: false, error: errorMessage }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     if (configureResult.status === 'ok') {
       // Update posts count
