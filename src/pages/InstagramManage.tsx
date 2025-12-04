@@ -696,95 +696,105 @@ export default function InstagramManage() {
         {/* Accounts Table */}
         <Card className="glass-card border-border/50">
           <CardHeader>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div>
-                <CardTitle className="text-lg">Connected Accounts</CardTitle>
-                <CardDescription>
-                  {accounts.length} of {profile?.account_limit || 2} accounts used
-                </CardDescription>
-              </div>
-              
-              {/* Batch Controls */}
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <Layers className="h-4 w-4 text-muted-foreground" />
-                  <Select value={selectedBatchFilter} onValueChange={setSelectedBatchFilter}>
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Filter by batch" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-popover border-border">
-                      <SelectItem value="all">All Accounts</SelectItem>
-                      <SelectItem value="unbatched">Unbatched</SelectItem>
-                      {batches.map(batch => (
-                        <SelectItem key={batch.id} value={batch.id}>
-                          {batch.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                  <CardTitle className="text-lg">Connected Accounts</CardTitle>
+                  <CardDescription>
+                    {accounts.length} of {profile?.account_limit || 2} accounts used
+                  </CardDescription>
                 </div>
                 
+                {/* Batch Controls */}
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <Layers className="h-4 w-4 text-muted-foreground" />
+                    <Select value={selectedBatchFilter} onValueChange={setSelectedBatchFilter}>
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="Filter by batch" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-popover border-border">
+                        <SelectItem value="all">All Accounts</SelectItem>
+                        <SelectItem value="unbatched">Unbatched</SelectItem>
+                        {batches.map(batch => (
+                          <SelectItem key={batch.id} value={batch.id}>
+                            {batch.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (selectedAccounts.size === 0) {
+                        toast.error('Please select accounts first');
+                        return;
+                      }
+                      setBatchModalOpen(true);
+                    }}
+                    disabled={selectedAccounts.size === 0}
+                    className="gap-2"
+                  >
+                    <FolderPlus className="h-4 w-4" />
+                    Add to Batch ({selectedAccounts.size})
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleBulkRefresh}
+                    disabled={selectedAccounts.size === 0 || bulkRefreshing}
+                    className="gap-2"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${bulkRefreshing ? 'animate-spin' : ''}`} />
+                    Refresh ({selectedAccounts.size})
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (selectedAccounts.size === 0) {
+                        toast.error('Please select accounts first');
+                        return;
+                      }
+                      setDeleteConfirmOpen(true);
+                    }}
+                    disabled={selectedAccounts.size === 0}
+                    className="gap-2 text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Remove ({selectedAccounts.size})
+                  </Button>
+
+                  <Button
+                    size="sm"
+                    onClick={openBulkPostDialog}
+                    disabled={selectedAccounts.size === 0}
+                    className="gap-2 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
+                  >
+                    <Send className="h-4 w-4" />
+                    Go Photo Post ({selectedAccounts.size})
+                  </Button>
+                </div>
+              </div>
+
+              {/* Search Row */}
+              <div className="flex items-center gap-3">
                 <Input
                   placeholder="Search by username..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-[200px]"
+                  className="w-full sm:w-[300px]"
                 />
-                
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    if (selectedAccounts.size === 0) {
-                      toast.error('Please select accounts first');
-                      return;
-                    }
-                    setBatchModalOpen(true);
-                  }}
-                  disabled={selectedAccounts.size === 0}
-                  className="gap-2"
-                >
-                  <FolderPlus className="h-4 w-4" />
-                  Add to Batch ({selectedAccounts.size})
-                </Button>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleBulkRefresh}
-                  disabled={selectedAccounts.size === 0 || bulkRefreshing}
-                  className="gap-2"
-                >
-                  <RefreshCw className={`h-4 w-4 ${bulkRefreshing ? 'animate-spin' : ''}`} />
-                  Refresh ({selectedAccounts.size})
-                </Button>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    if (selectedAccounts.size === 0) {
-                      toast.error('Please select accounts first');
-                      return;
-                    }
-                    setDeleteConfirmOpen(true);
-                  }}
-                  disabled={selectedAccounts.size === 0}
-                  className="gap-2 text-destructive hover:text-destructive"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Remove ({selectedAccounts.size})
-                </Button>
-
-                <Button
-                  size="sm"
-                  onClick={openBulkPostDialog}
-                  disabled={selectedAccounts.size === 0}
-                  className="gap-2 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
-                >
-                  <Send className="h-4 w-4" />
-                  Go Photo Post ({selectedAccounts.size})
-                </Button>
+                {searchQuery && (
+                  <span className="text-sm text-muted-foreground">
+                    {filteredAccounts.length} results
+                  </span>
+                )}
               </div>
             </div>
           </CardHeader>
