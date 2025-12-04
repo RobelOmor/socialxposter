@@ -100,6 +100,7 @@ export default function InstagramManage() {
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkRefreshing, setBulkRefreshing] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   
   // Bulk photo post state
   const [bulkPostOpen, setBulkPostOpen] = useState(false);
@@ -599,11 +600,20 @@ export default function InstagramManage() {
     toast.success(`Bulk post complete: ${successCount} success, ${failedCount} failed`);
   };
 
-  // Filter accounts based on selected batch
+  // Filter accounts based on selected batch and search query
   const filteredAccounts = accounts.filter(account => {
-    if (selectedBatchFilter === 'all') return true;
-    if (selectedBatchFilter === 'unbatched') return !account.batch_id;
-    return account.batch_id === selectedBatchFilter;
+    // Batch filter
+    let matchesBatch = true;
+    if (selectedBatchFilter === 'all') matchesBatch = true;
+    else if (selectedBatchFilter === 'unbatched') matchesBatch = !account.batch_id;
+    else matchesBatch = account.batch_id === selectedBatchFilter;
+
+    // Search filter
+    const matchesSearch = searchQuery.trim() === '' || 
+      account.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (account.full_name?.toLowerCase().includes(searchQuery.toLowerCase()));
+
+    return matchesBatch && matchesSearch;
   });
 
   return (
@@ -713,6 +723,13 @@ export default function InstagramManage() {
                     </SelectContent>
                   </Select>
                 </div>
+                
+                <Input
+                  placeholder="Search by username..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-[200px]"
+                />
                 
                 <Button
                   variant="outline"
