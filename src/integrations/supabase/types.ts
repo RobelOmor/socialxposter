@@ -100,6 +100,62 @@ export type Database = {
           },
         ]
       }
+      photo_service_categories: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          photo_count: number
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          photo_count?: number
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          photo_count?: number
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      photo_service_items: {
+        Row: {
+          category_id: string
+          created_at: string
+          id: string
+          photo_url: string
+        }
+        Insert: {
+          category_id: string
+          created_at?: string
+          id?: string
+          photo_url: string
+        }
+        Update: {
+          category_id?: string
+          created_at?: string
+          id?: string
+          photo_url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "photo_service_items_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "photo_service_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           account_limit: number | null
