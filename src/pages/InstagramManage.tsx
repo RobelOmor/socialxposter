@@ -195,6 +195,11 @@ export default function InstagramManage() {
         body: { accountId: account.id, action: 'refresh' }
       });
 
+      console.log('=== Refresh Account Response ===');
+      console.log('Account:', account.username);
+      console.log('Full Response:', JSON.stringify(data, null, 2));
+      if (error) console.log('Error:', error);
+
       if (error) throw error;
 
       if (data.success) {
@@ -204,6 +209,7 @@ export default function InstagramManage() {
         toast.error(data.error || 'Failed to refresh', { id: 'refresh' });
       }
     } catch (error: any) {
+      console.log('Refresh Error:', error);
       toast.error(error.message || 'Failed to refresh account', { id: 'refresh' });
     }
   };
