@@ -133,6 +133,8 @@ serve(async (req) => {
       console.log('Failed to parse response as JSON');
     }
 
+    let isSuspended = false;
+    
     if (userInfoResponse.ok && userInfo?.user) {
       const igUser = userInfo.user;
       newStatus = 'active';
@@ -150,6 +152,18 @@ serve(async (req) => {
     } else {
       console.log('Session marked as EXPIRED');
       console.log('Reason - Response OK:', userInfoResponse.ok, '| User exists:', !!userInfo?.user);
+      
+      // Check for suspend conditions
+      const hasChallengeRequired = userInfo?.message === 'challenge_required';
+      const hasSuspendedUrl = responseText.includes('instagram.com/accounts/suspended');
+      
+      if (hasChallengeRequired || hasSuspendedUrl) {
+        console.log('=== SUSPEND DETECTED ===');
+        console.log('Challenge required:', hasChallengeRequired);
+        console.log('Suspended URL found:', hasSuspendedUrl);
+        isSuspended = true;
+      }
+      
       if (userInfo?.message) console.log('Instagram message:', userInfo.message);
       if (userInfo?.status) console.log('Instagram status:', userInfo.status);
       if (userInfo?.error_type) console.log('Error type:', userInfo.error_type);
@@ -163,6 +177,7 @@ serve(async (req) => {
     let instagramResponse: any = {
       http_status: userInfoResponse.status,
       http_status_text: userInfoResponse.statusText,
+      is_suspended: isSuspended,
     };
     
     if (userInfo) {
