@@ -267,7 +267,7 @@ export type Database = {
       }
     }
     Enums: {
-      account_status: "active" | "expired" | "pending"
+      account_status: "active" | "expired" | "pending" | "suspended"
       app_role: "admin" | "moderator" | "user"
       subscription_plan: "free" | "premium"
     }
@@ -397,7 +397,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      account_status: ["active", "expired", "pending"],
+      account_status: ["active", "expired", "pending", "suspended"],
       app_role: ["admin", "moderator", "user"],
       subscription_plan: ["free", "premium"],
     },

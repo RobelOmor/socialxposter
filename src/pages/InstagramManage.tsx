@@ -53,7 +53,7 @@ interface InstagramAccount {
   posts_count: number;
   followers_count: number;
   following_count: number;
-  status: 'active' | 'expired' | 'pending';
+  status: 'active' | 'expired' | 'pending' | 'suspended';
   cookies: string;
   created_at: string | null;
   batch_id: string | null;
@@ -114,9 +114,6 @@ export default function InstagramManage() {
     total: number;
     details: { username: string; status: 'success' | 'failed'; error?: string }[];
   } | null>(null);
-  
-  // Track suspended accounts (detected via challenge_required or suspended URL)
-  const [suspendedAccounts, setSuspendedAccounts] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (user) {
@@ -209,15 +206,8 @@ export default function InstagramManage() {
         // Check if account is suspended
         if (data.instagram_response?.is_suspended) {
           console.log('=== SUSPEND DETECTED for', account.username, '===');
-          setSuspendedAccounts(prev => new Set(prev).add(account.id));
           toast.error('Account is SUSPENDED!', { id: 'refresh' });
         } else {
-          // Remove from suspended set if it was there
-          setSuspendedAccounts(prev => {
-            const newSet = new Set(prev);
-            newSet.delete(account.id);
-            return newSet;
-          });
           toast.success('Account refreshed!', { id: 'refresh' });
         }
         fetchAccounts();
@@ -422,7 +412,6 @@ export default function InstagramManage() {
     let successCount = 0;
     let failCount = 0;
     let suspendCount = 0;
-    const newSuspendedAccounts = new Set(suspendedAccounts);
 
     toast.loading(`Refreshing ${selectedArray.length} accounts...`, { id: 'bulk-refresh' });
 
@@ -439,19 +428,13 @@ export default function InstagramManage() {
           
           // Check if account is suspended
           if (data.instagram_response?.is_suspended) {
-            newSuspendedAccounts.add(accountId);
             suspendCount++;
-          } else {
-            newSuspendedAccounts.delete(accountId);
           }
         }
       } catch {
         failCount++;
       }
     }
-
-    // Update suspended accounts set
-    setSuspendedAccounts(newSuspendedAccounts);
 
     if (suspendCount > 0) {
       toast.error(`${suspendCount} account(s) SUSPENDED!`, { id: 'bulk-refresh' });
@@ -939,7 +922,7 @@ export default function InstagramManage() {
                               className={
                                 account.status === 'active' 
                                   ? 'bg-green-500/20 text-green-500 hover:bg-green-500/30' 
-                                  : suspendedAccounts.has(account.id)
+                                  : account.status === 'suspended'
                                     ? 'bg-red-600/30 text-red-400 hover:bg-red-600/40'
                                     : ''
                               }
@@ -951,7 +934,7 @@ export default function InstagramManage() {
                               )}
                               {account.status === 'active' 
                                 ? 'active' 
-                                : suspendedAccounts.has(account.id) 
+                                : account.status === 'suspended' 
                                   ? 'Suspend' 
                                   : 'expired'}
                             </Badge>

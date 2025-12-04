@@ -119,7 +119,7 @@ serve(async (req) => {
     const responseText = await userInfoResponse.text();
     console.log('Raw Response Body:', responseText);
     
-    let newStatus: 'active' | 'expired' = 'expired';
+    let newStatus: 'active' | 'expired' | 'suspended' = 'expired';
     let updateData: any = {
       last_checked: new Date().toISOString(),
     };
@@ -150,7 +150,7 @@ serve(async (req) => {
       };
       console.log('Session is ACTIVE');
     } else {
-      console.log('Session marked as EXPIRED');
+      console.log('Session marked as EXPIRED or SUSPENDED');
       console.log('Reason - Response OK:', userInfoResponse.ok, '| User exists:', !!userInfo?.user);
       
       // Check for suspend conditions
@@ -162,6 +162,10 @@ serve(async (req) => {
         console.log('Challenge required:', hasChallengeRequired);
         console.log('Suspended URL found:', hasSuspendedUrl);
         isSuspended = true;
+        newStatus = 'suspended';
+        updateData.status = 'suspended';
+      } else {
+        updateData.status = 'expired';
       }
       
       if (userInfo?.message) console.log('Instagram message:', userInfo.message);
@@ -170,7 +174,6 @@ serve(async (req) => {
       if (userInfo?.spam) console.log('Spam flag:', userInfo.spam);
       if (userInfo?.lock) console.log('Lock flag:', userInfo.lock);
       if (userInfo?.checkpoint_url) console.log('Checkpoint URL:', userInfo.checkpoint_url);
-      updateData.status = 'expired';
     }
     
     // Build instagram_response object for frontend debugging
