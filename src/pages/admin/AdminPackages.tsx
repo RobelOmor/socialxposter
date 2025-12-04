@@ -159,6 +159,10 @@ export default function AdminPackages() {
     return users?.find(u => u.id === userId)?.full_name || 'Unknown';
   };
 
+  const getUserEmail = (userId: string) => {
+    return users?.find(u => u.id === userId)?.email || '-';
+  };
+
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -261,6 +265,7 @@ export default function AdminPackages() {
                   <TableRow>
                     <TableHead>#</TableHead>
                     <TableHead>User</TableHead>
+                    <TableHead>Email</TableHead>
                     <TableHead>Previous Plan</TableHead>
                     <TableHead>New Plan</TableHead>
                     <TableHead>Prev Limit</TableHead>
@@ -271,10 +276,11 @@ export default function AdminPackages() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {history.map((record, index) => (
+                {history.map((record, index) => (
                     <TableRow key={record.id}>
                       <TableCell>{index + 1}</TableCell>
                       <TableCell className="font-medium">{getUserName(record.user_id)}</TableCell>
+                      <TableCell className="text-muted-foreground">{getUserEmail(record.user_id)}</TableCell>
                       <TableCell>
                         {record.previous_plan ? (
                           <Badge variant="outline">{record.previous_plan}</Badge>
