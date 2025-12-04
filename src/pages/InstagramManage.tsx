@@ -115,6 +115,12 @@ export default function InstagramManage() {
     details: { username: string; status: 'success' | 'failed'; error?: string }[];
   } | null>(null);
 
+  // Bio edit state
+  const [bioEditOpen, setBioEditOpen] = useState(false);
+  const [bioEditAccount, setBioEditAccount] = useState<InstagramAccount | null>(null);
+  const [newBioText, setNewBioText] = useState('');
+  const [updatingBio, setUpdatingBio] = useState(false);
+
   useEffect(() => {
     if (user) {
       fetchAccounts();
@@ -655,6 +661,68 @@ export default function InstagramManage() {
     toast.success(`Bulk post complete: ${successCount} success, ${failedCount} failed`);
   };
 
+  // Handle bio edit
+  const openBioEdit = (account: InstagramAccount) => {
+    setBioEditAccount(account);
+    setNewBioText(account.bio || '');
+    setBioEditOpen(true);
+  };
+
+  const handleUpdateBio = async () => {
+    if (!bioEditAccount) return;
+    
+    setUpdatingBio(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await fetch(
+        'https://iilyhckcapcsoidabspp.supabase.co/functions/v1/instagram-update-bio',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`,
+          },
+          body: JSON.stringify({
+            accountId: bioEditAccount.id,
+            newBio: newBioText.trim(),
+          }),
+        }
+      );
+
+      const result = await response.json();
+      console.log('Bio update response:', result);
+
+      if (result.success) {
+        toast.success('Bio updated successfully');
+        // Update local state
+        setAccounts(prev => prev.map(acc => 
+          acc.id === bioEditAccount.id ? { ...acc, bio: newBioText.trim() } : acc
+        ));
+        setBioEditOpen(false);
+      } else {
+        if (result.reason === 'suspended') {
+          toast.error('Account is suspended');
+          setAccounts(prev => prev.map(acc => 
+            acc.id === bioEditAccount.id ? { ...acc, status: 'suspended' } : acc
+          ));
+        } else if (result.reason === 'expired') {
+          toast.error('Session expired, please refresh cookies');
+          setAccounts(prev => prev.map(acc => 
+            acc.id === bioEditAccount.id ? { ...acc, status: 'expired' } : acc
+          ));
+        } else {
+          toast.error(result.error || 'Failed to update bio');
+        }
+      }
+    } catch (error) {
+      console.error('Bio update error:', error);
+      toast.error('Failed to update bio');
+    } finally {
+      setUpdatingBio(false);
+    }
+  };
+
   // Filter accounts based on selected batch and search query
   const filteredAccounts = accounts.filter(account => {
     // Batch filter
@@ -923,9 +991,17 @@ export default function InstagramManage() {
                         <TableCell className="text-center">{account.followers_count.toLocaleString()}</TableCell>
                         <TableCell className="text-center">{account.following_count.toLocaleString()}</TableCell>
                         <TableCell className="max-w-48">
-                          <p className="text-sm text-muted-foreground truncate" title={account.bio || ''}>
-                            {account.bio || '-'}
-                          </p>
+                          <button
+                            onClick={() => openBioEdit(account)}
+                            className="text-sm text-left w-full truncate hover:text-primary cursor-pointer transition-colors"
+                            title={account.bio || 'Click to add bio'}
+                          >
+                            {account.bio ? (
+                              <span className="text-muted-foreground">{account.bio}</span>
+                            ) : (
+                              <span className="text-muted-foreground/50 italic">no_bio_set</span>
+                            )}
+                          </button>
                         </TableCell>
                         <TableCell className="text-center">
                           <span className="text-sm text-muted-foreground">
@@ -1308,6 +1384,48 @@ export default function InstagramManage() {
                   </Button>
                 </div>
               )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Bio Edit Dialog */}
+        <Dialog open={bioEditOpen} onOpenChange={setBioEditOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Edit Bio</DialogTitle>
+              <DialogDescription>
+                Update bio for @{bioEditAccount?.username}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="bio-text">Bio Text</Label>
+                <Textarea
+                  id="bio-text"
+                  placeholder="Enter your bio..."
+                  value={newBioText}
+                  onChange={(e) => setNewBioText(e.target.value)}
+                  rows={4}
+                  maxLength={150}
+                />
+                <p className="text-xs text-muted-foreground text-right">
+                  {newBioText.length}/150
+                </p>
+              </div>
+              <Button 
+                onClick={handleUpdateBio} 
+                disabled={updatingBio}
+                className="w-full"
+              >
+                {updatingBio ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Updating...
+                  </>
+                ) : (
+                  'Update Bio'
+                )}
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
