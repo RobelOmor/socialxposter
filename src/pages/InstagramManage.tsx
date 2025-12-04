@@ -781,7 +781,12 @@ export default function InstagramManage() {
                         <TableCell className="font-medium">{index + 1}</TableCell>
                         <TableCell>
                           <Avatar className="h-12 w-12 border border-border">
-                            <AvatarImage src={account.profile_pic_url || ''} />
+                            <AvatarImage 
+                              src={account.profile_pic_url 
+                                ? `https://iilyhckcapcsoidabspp.supabase.co/functions/v1/proxy-image?url=${encodeURIComponent(account.profile_pic_url)}`
+                                : ''
+                              } 
+                            />
                             <AvatarFallback className="bg-pink-500/10 text-pink-500">
                               {account.username?.[0]?.toUpperCase() || 'I'}
                             </AvatarFallback>

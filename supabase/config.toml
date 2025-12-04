@@ -8,3 +8,6 @@ verify_jwt = true
 
 [functions.instagram-post-photo]
 verify_jwt = true
+
+[functions.proxy-image]
+verify_jwt = false
