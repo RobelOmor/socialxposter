@@ -114,6 +114,9 @@ export default function InstagramManage() {
     total: number;
     details: { username: string; status: 'success' | 'failed'; error?: string }[];
   } | null>(null);
+  
+  // Track suspended accounts (detected via challenge_required or suspended URL)
+  const [suspendedAccounts, setSuspendedAccounts] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (user) {
@@ -203,7 +206,20 @@ export default function InstagramManage() {
       if (error) throw error;
 
       if (data.success) {
-        toast.success('Account refreshed!', { id: 'refresh' });
+        // Check if account is suspended
+        if (data.instagram_response?.is_suspended) {
+          console.log('=== SUSPEND DETECTED for', account.username, '===');
+          setSuspendedAccounts(prev => new Set(prev).add(account.id));
+          toast.error('Account is SUSPENDED!', { id: 'refresh' });
+        } else {
+          // Remove from suspended set if it was there
+          setSuspendedAccounts(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(account.id);
+            return newSet;
+          });
+          toast.success('Account refreshed!', { id: 'refresh' });
+        }
         fetchAccounts();
       } else {
         toast.error(data.error || 'Failed to refresh', { id: 'refresh' });
@@ -905,14 +921,24 @@ export default function InstagramManage() {
                           <div className="flex items-center justify-center gap-2">
                             <Badge 
                               variant={account.status === 'active' ? 'default' : 'destructive'}
-                              className={account.status === 'active' ? 'bg-green-500/20 text-green-500 hover:bg-green-500/30' : ''}
+                              className={
+                                account.status === 'active' 
+                                  ? 'bg-green-500/20 text-green-500 hover:bg-green-500/30' 
+                                  : suspendedAccounts.has(account.id)
+                                    ? 'bg-red-600/30 text-red-400 hover:bg-red-600/40'
+                                    : ''
+                              }
                             >
                               {account.status === 'active' ? (
                                 <CheckCircle2 className="h-3 w-3 mr-1" />
                               ) : (
                                 <XCircle className="h-3 w-3 mr-1" />
                               )}
-                              {account.status}
+                              {account.status === 'active' 
+                                ? 'active' 
+                                : suspendedAccounts.has(account.id) 
+                                  ? 'Suspend' 
+                                  : 'expired'}
                             </Badge>
                             {isToday(account.created_at) && (
                               <Badge className="bg-purple-500/20 text-purple-400 hover:bg-purple-500/30">
