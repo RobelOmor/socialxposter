@@ -68,6 +68,13 @@ export default function TelegramManage() {
     details: { username: string; status: 'success' | 'failed'; error?: string }[];
   } | null>(null);
 
+  // Single message state (per session)
+  const [singleMessageOpen, setSingleMessageOpen] = useState(false);
+  const [singleSession, setSingleSession] = useState<TelegramSession | null>(null);
+  const [singleUsername, setSingleUsername] = useState('');
+  const [singleContent, setSingleContent] = useState('');
+  const [sendingSingle, setSendingSingle] = useState(false);
+
   // Edit proxy state
   const [editProxyOpen, setEditProxyOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<TelegramSession | null>(null);
@@ -232,12 +239,12 @@ export default function TelegramManage() {
         } : null,
       });
 
-      if (data.success && data.authorized) {
+      if (data.valid) {
         await supabase
           .from('telegram_sessions')
           .update({ 
             status: 'active',
-            telegram_name: data.user_name || data.first_name || null
+            telegram_name: data.user_name || data.first_name || data.username || null
           })
           .eq('id', session.id);
         toast.success(`Session valid${data.first_name ? ': ' + data.first_name : ''}`);
@@ -246,11 +253,70 @@ export default function TelegramManage() {
           .from('telegram_sessions')
           .update({ status: 'expired' })
           .eq('id', session.id);
-        toast.error('Session expired');
+        toast.error(data.error || 'Session expired');
       }
       fetchSessions();
     } catch (error: any) {
       toast.error(error.message || 'Failed to validate session');
+    }
+  };
+
+  // Single message handler
+  const handleSendSingleMessage = async () => {
+    if (!singleSession || !singleUsername.trim() || !singleContent.trim()) {
+      toast.error('Enter username and message');
+      return;
+    }
+
+    setSendingSingle(true);
+    try {
+      const data = await callVpsProxy('/send-message', {
+        session_data: singleSession.session_data,
+        destination: singleUsername.trim(),
+        message: singleContent.trim(),
+        proxy: singleSession.proxy_host
+          ? {
+              host: singleSession.proxy_host,
+              port: singleSession.proxy_port,
+              username: singleSession.proxy_username,
+              password: singleSession.proxy_password,
+            }
+          : null,
+      });
+
+      if (data && (data as any).error) {
+        throw new Error((data as any).error);
+      }
+
+      await supabase
+        .from('telegram_sessions')
+        .update({
+          messages_sent: (singleSession.messages_sent || 0) + 1,
+          last_used_at: new Date().toISOString(),
+        })
+        .eq('id', singleSession.id);
+
+      if (user) {
+        await supabase.from('telegram_messages').insert({
+          user_id: user.id,
+          session_id: singleSession.id,
+          destination: singleUsername.trim(),
+          message_content: singleContent.trim(),
+          status: 'sent',
+          sent_at: new Date().toISOString(),
+        });
+      }
+
+      toast.success(`Message sent to ${singleUsername.trim()}`);
+      setSingleMessageOpen(false);
+      setSingleUsername('');
+      setSingleContent('');
+      setSingleSession(null);
+      fetchSessions();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to send message');
+    } finally {
+      setSendingSingle(false);
     }
   };
 
@@ -571,6 +637,20 @@ export default function TelegramManage() {
                           <Button
                             size="sm"
                             variant="ghost"
+                            disabled={session.status !== 'active'}
+                            onClick={() => {
+                              setSingleSession(session);
+                              setSingleUsername('');
+                              setSingleContent('');
+                              setSingleMessageOpen(true);
+                            }}
+                            title="Send Single Message"
+                          >
+                            <Send className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
                             onClick={() => openEditProxy(session)}
                             title="Edit Proxy"
                           >
@@ -627,6 +707,59 @@ export default function TelegramManage() {
               }} />
             </TabsContent>
           </Tabs>
+        </DialogContent>
+      </Dialog>
+
+      {/* Single Message Dialog */}
+      <Dialog open={singleMessageOpen} onOpenChange={setSingleMessageOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Send Message</DialogTitle>
+            <DialogDescription>
+              Send a single message using session {singleSession?.phone_number}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div>
+              <Label>Username or ID</Label>
+              <Input
+                placeholder="@username or user_id"
+                value={singleUsername}
+                onChange={(e) => setSingleUsername(e.target.value)}
+                disabled={sendingSingle}
+              />
+            </div>
+
+            <div>
+              <Label>Message Content</Label>
+              <Textarea
+                placeholder="Your message here..."
+                value={singleContent}
+                onChange={(e) => setSingleContent(e.target.value)}
+                rows={4}
+                disabled={sendingSingle}
+              />
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setSingleMessageOpen(false)}
+                disabled={sendingSingle}
+              >
+                Cancel
+              </Button>
+              <Button onClick={handleSendSingleMessage} disabled={sendingSingle} className="gap-2">
+                {sendingSingle ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                Send
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
