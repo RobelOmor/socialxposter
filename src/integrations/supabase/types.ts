@@ -413,6 +413,7 @@ export type Database = {
           session_data: string
           session_name: string | null
           status: string
+          telegram_name: string | null
           updated_at: string
           user_id: string
         }
@@ -430,6 +431,7 @@ export type Database = {
           session_data: string
           session_name?: string | null
           status?: string
+          telegram_name?: string | null
           updated_at?: string
           user_id: string
         }
@@ -447,6 +449,7 @@ export type Database = {
           session_data?: string
           session_name?: string | null
           status?: string
+          telegram_name?: string | null
           updated_at?: string
           user_id?: string
         }

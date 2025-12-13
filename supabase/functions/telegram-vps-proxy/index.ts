@@ -51,6 +51,16 @@ serve(async (req) => {
     const vpsUrl = `${vpsBaseUrl}${endpoint}`;
     console.log(`Proxying ${method} request to: ${vpsUrl}`);
 
+    // Inject API credentials into the body for endpoints that need them
+    let enrichedBody = body || {};
+    if (endpoint !== '/health') {
+      enrichedBody = {
+        ...enrichedBody,
+        api_id: enrichedBody.api_id || config.api_id || '2040',
+        api_hash: enrichedBody.api_hash || config.api_hash || 'b18441a1ff607e10a989891a5462e627',
+      };
+    }
+
     const fetchOptions: RequestInit = {
       method,
       headers: {
@@ -58,8 +68,8 @@ serve(async (req) => {
       },
     };
 
-    if (body && method !== 'GET') {
-      fetchOptions.body = JSON.stringify(body);
+    if (method !== 'GET') {
+      fetchOptions.body = JSON.stringify(enrichedBody);
     }
 
     const response = await fetch(vpsUrl, fetchOptions);

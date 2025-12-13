@@ -35,6 +35,7 @@ interface TelegramSession {
   session_name: string | null;
   session_data: string;
   status: string;
+  telegram_name: string | null;
   proxy_host: string | null;
   proxy_port: number | null;
   proxy_username: string | null;
@@ -221,6 +222,8 @@ export default function TelegramManage() {
     try {
       const data = await callVpsProxy("/validate-session", {
         session_data: session.session_data,
+        api_id: config.apiId,
+        api_hash: config.apiHash,
         proxy: session.proxy_host ? {
           host: session.proxy_host,
           port: session.proxy_port,
@@ -232,9 +235,12 @@ export default function TelegramManage() {
       if (data.success && data.authorized) {
         await supabase
           .from('telegram_sessions')
-          .update({ status: 'active' })
+          .update({ 
+            status: 'active',
+            telegram_name: data.user_name || data.first_name || null
+          })
           .eq('id', session.id);
-        toast.success('Session is valid');
+        toast.success(`Session valid${data.first_name ? ': ' + data.first_name : ''}`);
       } else {
         await supabase
           .from('telegram_sessions')
@@ -501,6 +507,7 @@ export default function TelegramManage() {
                   </TableHead>
                   <TableHead>#</TableHead>
                   <TableHead>Phone Number</TableHead>
+                  <TableHead>Telegram Name</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Proxy</TableHead>
                   <TableHead>Messages</TableHead>
@@ -512,13 +519,13 @@ export default function TelegramManage() {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-8">
+                    <TableCell colSpan={10} className="text-center py-8">
                       <Loader2 className="h-6 w-6 animate-spin mx-auto" />
                     </TableCell>
                   </TableRow>
                 ) : filteredSessions.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                       No sessions found. Add your first session to get started.
                     </TableCell>
                   </TableRow>
@@ -533,6 +540,9 @@ export default function TelegramManage() {
                       </TableCell>
                       <TableCell>{index + 1}</TableCell>
                       <TableCell className="font-medium">{session.phone_number}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {session.telegram_name || '-'}
+                      </TableCell>
                       <TableCell>{getStatusBadge(session.status)}</TableCell>
                       <TableCell>
                         {session.proxy_host ? (
