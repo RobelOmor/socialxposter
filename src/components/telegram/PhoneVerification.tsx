@@ -75,12 +75,12 @@ export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerif
         proxy: getProxyConfig(),
       });
 
-      if (data.success) {
-        setPhoneCodeHash(data.phone_code_hash);
+      if (data.status === "ok" || data.success) {
+        setPhoneCodeHash(data.phone_code_hash || "");
         setStep("code");
         toast.success("Verification code sent!");
       } else {
-        toast.error(data.error || "Failed to send code");
+        toast.error(data.error || data.message || "Failed to send code");
       }
     } catch (error: any) {
       toast.error(error.message || "Cannot connect to VPS API");
