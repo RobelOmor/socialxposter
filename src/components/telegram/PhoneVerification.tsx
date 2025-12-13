@@ -98,8 +98,7 @@ export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerif
     try {
       const data = await callVpsProxy("/verify-code", {
         phone_number: phoneNumber,
-        phone_code: verificationCode,
-        phone_code_hash: phoneCodeHash,
+        code: verificationCode,
         api_id: apiId,
         api_hash: apiHash,
         proxy: getProxyConfig(),
