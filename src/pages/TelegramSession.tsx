@@ -15,9 +15,13 @@ interface TelegramSessionData {
   id: string;
   phone_number: string;
   session_name: string | null;
+  telegram_name: string | null;
+  session_data: string;
   status: string;
   proxy_host: string | null;
   proxy_port: number | null;
+  proxy_username: string | null;
+  proxy_password: string | null;
   messages_sent: number | null;
   replies_received: number | null;
 }
@@ -37,7 +41,7 @@ const TelegramSession = () => {
 
     const { data, error } = await supabase
       .from("telegram_sessions")
-      .select("id, phone_number, session_name, status, proxy_host, proxy_port, messages_sent, replies_received")
+      .select("id, phone_number, session_name, telegram_name, session_data, status, proxy_host, proxy_port, proxy_username, proxy_password, messages_sent, replies_received")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
