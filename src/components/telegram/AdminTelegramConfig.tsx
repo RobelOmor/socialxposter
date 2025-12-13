@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { Server, Key, Settings, Loader2, Check, X, RefreshCw } from "lucide-react";
+import { Server, Key, Settings, Loader2, Check, X, RefreshCw, Upload, MessageCircle, User, Phone } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -25,8 +25,11 @@ export const AdminTelegramConfig = () => {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testingSession, setTestingSession] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [apiStatus, setApiStatus] = useState<"unknown" | "online" | "offline">("unknown");
   const [testResult, setTestResult] = useState<string>("");
+  const [sessionDetails, setSessionDetails] = useState<any>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form state
   const [vpsIp, setVpsIp] = useState("");
@@ -129,9 +132,72 @@ export const AdminTelegramConfig = () => {
     setTesting(false);
   };
 
-  const testSessionValidation = async () => {
+  const handleSessionUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    try {
+      // Read file as base64
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const base64Data = btoa(
+          new Uint8Array(event.target?.result as ArrayBuffer)
+            .reduce((data, byte) => data + String.fromCharCode(byte), '')
+        );
+
+        // Extract phone from filename (e.g., +12093130115.session)
+        const phoneMatch = file.name.match(/\+?(\d+)\.session/);
+        const phoneNumber = phoneMatch ? phoneMatch[1] : file.name.replace('.session', '');
+
+        // Test the session with VPS
+        const { data, error } = await supabase.functions.invoke("telegram-vps-proxy", {
+          body: {
+            endpoint: "/validate-session",
+            method: "POST",
+            body: {
+              session_data: base64Data,
+              phone_number: phoneNumber,
+            }
+          }
+        });
+
+        if (error) throw error;
+
+        setTestResult(JSON.stringify(data, null, 2));
+        
+        if (data?.valid) {
+          setSessionDetails({
+            phone: data.phone || phoneNumber,
+            first_name: data.first_name || data.user_name || 'Unknown',
+            username: data.username,
+            dialogs_count: data.dialogs_count || 0,
+            unread_count: data.unread_count || 0,
+            session_data: base64Data,
+          });
+          toast.success(`Session valid! User: ${data.first_name || data.user_name}`);
+        } else {
+          setSessionDetails(null);
+          toast.error("Session invalid: " + (data?.error || "Unknown error"));
+        }
+        setUploading(false);
+      };
+      reader.readAsArrayBuffer(file);
+    } catch (error: any) {
+      toast.error(error.message);
+      setUploading(false);
+    }
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const testSessionWithFullDetails = async () => {
     setTestingSession(true);
     setTestResult("");
+    setSessionDetails(null);
     
     try {
       // Get a test session from DB
@@ -149,6 +215,7 @@ export const AdminTelegramConfig = () => {
       const session = sessions[0];
       console.log("Testing session:", session.phone_number);
       
+      // Call validate-session with get_details flag
       const { data, error } = await supabase.functions.invoke("telegram-vps-proxy", {
         body: {
           endpoint: "/validate-session",
@@ -156,6 +223,7 @@ export const AdminTelegramConfig = () => {
           body: {
             session_data: session.session_data,
             phone_number: session.phone_number,
+            get_details: true, // Request full details
             proxy: session.proxy_host ? {
               host: session.proxy_host,
               port: session.proxy_port,
@@ -172,8 +240,16 @@ export const AdminTelegramConfig = () => {
       if (error) {
         toast.error("Proxy error: " + error.message);
       } else if (data?.valid) {
-        toast.success(`Session valid! User: ${data.user_name || data.first_name || 'Unknown'}`);
+        setSessionDetails({
+          phone: data.phone || session.phone_number,
+          first_name: data.first_name || data.user_name || 'Unknown',
+          username: data.username,
+          dialogs_count: data.dialogs_count || 0,
+          unread_count: data.unread_count || 0,
+        });
+        toast.success(`Session valid! User: ${data.first_name || data.user_name || 'Unknown'}`);
       } else {
+        setSessionDetails(null);
         toast.warning("Session invalid: " + (data?.error || "Unknown error"));
       }
     } catch (error: any) {
@@ -245,28 +321,99 @@ export const AdminTelegramConfig = () => {
 
           <Separator className="my-4" />
           
-          {/* Session Test */}
-          <div className="space-y-2">
-            <Label>Test Session Validation</Label>
-            <p className="text-xs text-muted-foreground">Test with a real session to debug validate-session endpoint</p>
-            <Button 
-              onClick={testSessionValidation} 
-              disabled={testingSession || apiStatus !== "online"} 
-              variant="secondary" 
-              className="gap-2"
-            >
-              {testingSession ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="h-4 w-4" />
-              )}
-              Test Session Validation
-            </Button>
+          {/* Session Upload Test */}
+          <div className="space-y-3">
+            <div>
+              <Label>Upload & Test Session File</Label>
+              <p className="text-xs text-muted-foreground">Upload a .session file to validate and see full details</p>
+            </div>
             
+            <div className="flex gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".session"
+                onChange={handleSessionUpload}
+                className="hidden"
+              />
+              <Button 
+                onClick={() => fileInputRef.current?.click()} 
+                disabled={uploading || apiStatus !== "online"} 
+                variant="outline" 
+                className="gap-2"
+              >
+                {uploading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4" />
+                )}
+                Upload .session File
+              </Button>
+              
+              <Button 
+                onClick={testSessionWithFullDetails} 
+                disabled={testingSession || apiStatus !== "online"} 
+                variant="secondary" 
+                className="gap-2"
+              >
+                {testingSession ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                Test Existing Session
+              </Button>
+            </div>
+            
+            {/* Session Details Card */}
+            {sessionDetails && (
+              <Card className="bg-green-500/5 border-green-500/20">
+                <CardContent className="pt-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="flex items-center gap-2">
+                      <Phone className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <p className="text-xs text-muted-foreground">Phone</p>
+                        <p className="font-medium">{sessionDetails.phone}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <User className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <p className="text-xs text-muted-foreground">Name</p>
+                        <p className="font-medium">{sessionDetails.first_name}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <MessageCircle className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <p className="text-xs text-muted-foreground">Dialogs</p>
+                        <p className="font-medium">{sessionDetails.dialogs_count}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <MessageCircle className="h-4 w-4 text-blue-500" />
+                      <div>
+                        <p className="text-xs text-muted-foreground">Unread</p>
+                        <p className="font-medium text-blue-500">{sessionDetails.unread_count}</p>
+                      </div>
+                    </div>
+                  </div>
+                  {sessionDetails.username && (
+                    <p className="text-sm text-muted-foreground mt-2">@{sessionDetails.username}</p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+            
+            {/* Raw Response */}
             {testResult && (
-              <pre className="p-3 bg-muted rounded-lg text-xs overflow-auto max-h-48 mt-2">
-                {testResult}
-              </pre>
+              <details className="mt-2">
+                <summary className="text-xs text-muted-foreground cursor-pointer">Raw VPS Response</summary>
+                <pre className="p-3 bg-muted rounded-lg text-xs overflow-auto max-h-48 mt-2">
+                  {testResult}
+                </pre>
+              </details>
             )}
           </div>
         </CardContent>
