@@ -8,7 +8,8 @@ import {
   ChevronDown,
   Zap,
   Shield,
-  X
+  X,
+  MessageSquare
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,7 +25,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const location = useLocation();
   const { signOut, profile, isAdmin } = useAuth();
   const [socialExpanded, setSocialExpanded] = useState(
-    location.pathname.includes('/social') || location.pathname.includes('/instagram')
+    location.pathname.includes('/social') || location.pathname.includes('/instagram') || location.pathname.includes('/telegram')
   );
 
   const navItems = [
@@ -33,6 +34,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
   const socialItems = [
     { icon: Instagram, label: 'Instagram Manage', path: '/instagram-manage' },
+    { icon: MessageSquare, label: 'Telegram Manage', path: '/telegram-manage' },
   ];
 
   const handleNavClick = () => {

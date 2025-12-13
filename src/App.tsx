@@ -14,7 +14,9 @@ import AdminInstagramAccounts from "./pages/admin/AdminInstagramAccounts";
 import AdminRoles from "./pages/admin/AdminRoles";
 import AdminPackages from "./pages/admin/AdminPackages";
 import AdminPhotoServer from "./pages/admin/AdminPhotoServer";
+import AdminTelegramSessions from "./pages/admin/AdminTelegramSessions";
 import TelegramSession from "./pages/TelegramSession";
+import TelegramManage from "./pages/TelegramManage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -69,7 +71,9 @@ function AppRoutes() {
       <Route path="/admin/roles" element={<ProtectedRoute><AdminRoles /></ProtectedRoute>} />
       <Route path="/admin/packages" element={<ProtectedRoute><AdminPackages /></ProtectedRoute>} />
       <Route path="/admin/photo-server" element={<ProtectedRoute><AdminPhotoServer /></ProtectedRoute>} />
+      <Route path="/admin/telegram-sessions" element={<ProtectedRoute><AdminTelegramSessions /></ProtectedRoute>} />
       <Route path="/tg_session" element={<ProtectedRoute><TelegramSession /></ProtectedRoute>} />
+      <Route path="/telegram-manage" element={<ProtectedRoute><TelegramManage /></ProtectedRoute>} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

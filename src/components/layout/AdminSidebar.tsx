@@ -10,7 +10,8 @@ import {
   Zap,
   Home,
   Package,
-  Server
+  Server,
+  MessageSquare
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -29,6 +30,7 @@ export function AdminSidebar() {
   const manageItems = [
     { icon: Users, label: 'Users', path: '/admin/users' },
     { icon: Instagram, label: 'Instagram Accounts', path: '/admin/instagram-accounts' },
+    { icon: MessageSquare, label: 'Telegram Sessions', path: '/admin/telegram-sessions' },
     { icon: Shield, label: 'Roles', path: '/admin/roles' },
     { icon: Package, label: 'Packages', path: '/admin/packages' },
     { icon: Server, label: 'Photo Server', path: '/admin/photo-server' },
