@@ -163,8 +163,12 @@ export const SessionList = ({
         }
       });
 
-      if (error || !data?.success) {
-        throw new Error(data?.error || error?.message || 'Failed to send message');
+      if (error) {
+        throw error;
+      }
+
+      if (data && (data as any).error) {
+        throw new Error((data as any).error);
       }
 
       // Update messages_sent count
@@ -192,12 +196,11 @@ export const SessionList = ({
       setSingleMessage("");
       onSessionsChange();
     } catch (err: any) {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
+      toast({ title: "Error", description: err.message || 'Failed to send message', variant: "destructive" });
     } finally {
       setSendingSingle(false);
     }
   };
-
   // Bulk message handler
   const handleSendBulkMessages = async () => {
     if (!bulkMsgSession || !bulkUsernames.trim() || !bulkMessage.trim()) {
@@ -239,7 +242,7 @@ export const SessionList = ({
           }
         });
 
-        if (error || !data?.success) {
+        if (error) {
           failedCount++;
           if (userData?.user) {
             await supabase.from('telegram_messages').insert({
@@ -248,7 +251,19 @@ export const SessionList = ({
               destination: username,
               message_content: bulkMessage.trim(),
               status: 'failed',
-              error_message: data?.error || error?.message,
+              error_message: error.message,
+            });
+          }
+        } else if (data && (data as any).error) {
+          failedCount++;
+          if (userData?.user) {
+            await supabase.from('telegram_messages').insert({
+              user_id: userData.user.id,
+              session_id: bulkMsgSession.id,
+              destination: username,
+              message_content: bulkMessage.trim(),
+              status: 'failed',
+              error_message: (data as any).error,
             });
           }
         } else {
@@ -264,7 +279,7 @@ export const SessionList = ({
             });
           }
         }
-      } catch {
+      } catch (err: any) {
         failedCount++;
       }
 
@@ -342,8 +357,12 @@ export const SessionList = ({
         }
       });
 
-      if (error || !data?.success) {
-        throw new Error(data?.error || error?.message || 'Failed to send reply');
+      if (error) {
+        throw error;
+      }
+
+      if (data && (data as any).error) {
+        throw new Error((data as any).error);
       }
 
       // Mark as replied
@@ -362,12 +381,31 @@ export const SessionList = ({
       loadReplies(replySession);
       onSessionsChange();
     } catch (err: any) {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
+      toast({ title: "Error", description: err.message || 'Failed to send reply', variant: "destructive" });
     } finally {
       setSendingReply(false);
     }
   };
 
+  const handleMarkReply = async (replyId: string) => {
+    try {
+      await supabase
+        .from('telegram_replies')
+        .update({ 
+          replied: true,
+          replied_at: new Date().toISOString(),
+        })
+        .eq('id', replyId);
+
+      toast({ title: "Marked", description: "Reply marked as handled" });
+      if (replySession) {
+        loadReplies(replySession);
+      }
+      onSessionsChange();
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || 'Failed to mark reply', variant: "destructive" });
+    }
+  };
   return (
     <>
       <Card className="bg-card border-border">
@@ -618,33 +656,43 @@ export const SessionList = ({
                       </span>
                     </div>
                     <p className="text-sm text-muted-foreground mt-1">{reply.message_content}</p>
-                    {replyingTo?.id === reply.id ? (
-                      <div className="mt-2 space-y-2">
-                        <Textarea
-                          placeholder="Type your reply..."
-                          value={replyContent}
-                          onChange={(e) => setReplyContent(e.target.value)}
-                          rows={2}
-                        />
-                        <div className="flex gap-2">
-                          <Button size="sm" onClick={handleSendReply} disabled={sendingReply}>
-                            {sendingReply ? "Sending..." : "Send Reply"}
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => { setReplyingTo(null); setReplyContent(""); }}>
-                            Cancel
-                          </Button>
+                    <div className="flex items-center gap-2 mt-2">
+                      {replyingTo?.id === reply.id ? (
+                        <div className="flex-1 space-y-2">
+                          <Textarea
+                            placeholder="Type your reply..."
+                            value={replyContent}
+                            onChange={(e) => setReplyContent(e.target.value)}
+                            rows={2}
+                          />
+                          <div className="flex gap-2">
+                            <Button size="sm" onClick={handleSendReply} disabled={sendingReply}>
+                              {sendingReply ? "Sending..." : "Send Reply"}
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => { setReplyingTo(null); setReplyContent(""); }}>
+                              Cancel
+                            </Button>
+                          </div>
                         </div>
-                      </div>
-                    ) : (
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
-                        className="mt-2"
-                        onClick={() => setReplyingTo(reply)}
+                      ) : (
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          onClick={() => setReplyingTo(reply)}
+                        >
+                          Reply
+                        </Button>
+                      )}
+
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-muted-foreground hover:text-foreground"
+                        onClick={() => handleMarkReply(reply.id)}
                       >
-                        Reply
+                        Mark
                       </Button>
-                    )}
+                    </div>
                   </div>
                 ))}
               </div>
