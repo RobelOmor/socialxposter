@@ -13,24 +13,19 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTelegramConfig } from '@/hooks/useTelegramConfig';
+import { PhoneVerification } from '@/components/telegram/PhoneVerification';
+import { SessionUpload } from '@/components/telegram/SessionUpload';
 import { 
   Plus, 
   RefreshCw, 
   Trash2, 
-  Upload,
   Loader2,
-  CheckCircle2,
-  XCircle,
-  FileSpreadsheet,
   Send,
   Download,
   Pencil,
-  Server,
-  Check,
-  X,
-  Copy,
-  ExternalLink,
-  MessageSquare
+  MessageSquare,
+  AlertCircle
 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 
@@ -52,26 +47,12 @@ interface TelegramSession {
 
 export default function TelegramManage() {
   const { user } = useAuth();
+  const { config, loading: configLoading } = useTelegramConfig();
   const [sessions, setSessions] = useState<TelegramSession[]>([]);
   const [loading, setLoading] = useState(true);
-  const [uploadOpen, setUploadOpen] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [addSessionOpen, setAddSessionOpen] = useState(false);
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
-  
-  // API Config state
-  const [pythonApiUrl, setPythonApiUrl] = useState(() => 
-    localStorage.getItem('telegram_python_api_url') || ''
-  );
-  const [isChecking, setIsChecking] = useState(false);
-  const [apiStatus, setApiStatus] = useState<"unknown" | "online" | "offline">("unknown");
-
-  // Upload form state
-  const [uploadFiles, setUploadFiles] = useState<FileList | null>(null);
-  const [proxyHost, setProxyHost] = useState('');
-  const [proxyPort, setProxyPort] = useState('');
-  const [proxyUsername, setProxyUsername] = useState('');
-  const [proxyPassword, setProxyPassword] = useState('');
 
   // Bulk message state
   const [bulkMessageOpen, setBulkMessageOpen] = useState(false);
@@ -120,124 +101,6 @@ export default function TelegramManage() {
       setSessions((data || []) as TelegramSession[]);
     }
     setLoading(false);
-  };
-
-  // API Config handlers
-  const handleApiUrlChange = (url: string) => {
-    setPythonApiUrl(url);
-    localStorage.setItem('telegram_python_api_url', url);
-    setApiStatus('unknown');
-  };
-
-  const handleCheckConnection = async () => {
-    if (!pythonApiUrl) {
-      toast.error('Enter API URL first');
-      return;
-    }
-
-    setIsChecking(true);
-    try {
-      const response = await fetch(`${pythonApiUrl}/health`, {
-        method: "GET",
-        mode: "cors",
-      });
-
-      if (response.ok) {
-        setApiStatus("online");
-        toast.success("Python API is online");
-      } else {
-        setApiStatus("offline");
-        toast.error("API returned error");
-      }
-    } catch (error) {
-      console.error("API check failed:", error);
-      setApiStatus("offline");
-      toast.error("Cannot connect to API");
-    }
-    setIsChecking(false);
-  };
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast.success("Copied to clipboard");
-  };
-
-  // File upload handler
-  const handleFileUpload = async () => {
-    if (!uploadFiles || uploadFiles.length === 0) {
-      toast.error('Please select .session files');
-      return;
-    }
-
-    if (!user) {
-      toast.error('Please login first');
-      return;
-    }
-
-    setUploading(true);
-    let successCount = 0;
-    let failCount = 0;
-
-    for (let i = 0; i < uploadFiles.length; i++) {
-      const file = uploadFiles[i];
-      if (!file.name.endsWith('.session')) {
-        failCount++;
-        continue;
-      }
-
-      try {
-        // Extract phone number from filename
-        const phoneNumber = file.name.replace('.session', '');
-        
-        // Read file as base64
-        const reader = new FileReader();
-        const sessionData = await new Promise<string>((resolve, reject) => {
-          reader.onload = () => {
-            const base64 = (reader.result as string).split(',')[1] || reader.result as string;
-            resolve(base64);
-          };
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-
-        // Upsert to database
-        const { error } = await supabase
-          .from('telegram_sessions')
-          .upsert({
-            user_id: user.id,
-            phone_number: phoneNumber,
-            session_name: file.name,
-            session_data: sessionData,
-            status: 'active',
-            proxy_host: proxyHost || null,
-            proxy_port: proxyPort ? parseInt(proxyPort) : null,
-            proxy_username: proxyUsername || null,
-            proxy_password: proxyPassword || null,
-          }, { onConflict: 'phone_number,user_id' });
-
-        if (error) throw error;
-        successCount++;
-      } catch (error) {
-        console.error('Upload error:', error);
-        failCount++;
-      }
-    }
-
-    if (successCount > 0) {
-      toast.success(`${successCount} session(s) uploaded successfully`);
-      setUploadOpen(false);
-      setUploadFiles(null);
-      setProxyHost('');
-      setProxyPort('');
-      setProxyUsername('');
-      setProxyPassword('');
-      fetchSessions();
-    }
-    if (failCount > 0) {
-      toast.error(`${failCount} session(s) failed to upload`);
-    }
-
-    setUploading(false);
   };
 
   // Selection handlers
@@ -339,6 +202,49 @@ export default function TelegramManage() {
     setSavingProxy(false);
   };
 
+  // Validate session
+  const handleValidateSession = async (session: TelegramSession) => {
+    if (!config.vpsApiUrl) {
+      toast.error('VPS API not configured. Contact admin.');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${config.vpsApiUrl}/validate-session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_data: session.session_data,
+          proxy: session.proxy_host ? {
+            host: session.proxy_host,
+            port: session.proxy_port,
+            username: session.proxy_username,
+            password: session.proxy_password,
+          } : null,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.authorized) {
+        await supabase
+          .from('telegram_sessions')
+          .update({ status: 'active' })
+          .eq('id', session.id);
+        toast.success('Session is valid');
+      } else {
+        await supabase
+          .from('telegram_sessions')
+          .update({ status: 'expired' })
+          .eq('id', session.id);
+        toast.error('Session expired');
+      }
+      fetchSessions();
+    } catch (error: any) {
+      toast.error('Failed to validate session');
+    }
+  };
+
   // Bulk message handler
   const handleBulkMessage = async () => {
     if (selectedSessions.size === 0) {
@@ -353,8 +259,8 @@ export default function TelegramManage() {
       toast.error('Enter message content');
       return;
     }
-    if (!pythonApiUrl) {
-      toast.error('Configure API URL first');
+    if (!config.vpsApiUrl) {
+      toast.error('VPS API not configured. Contact admin.');
       return;
     }
 
@@ -374,7 +280,7 @@ export default function TelegramManage() {
       const session = selectedSessionsArray[i % selectedSessionsArray.length];
 
       try {
-        const response = await fetch(`${pythonApiUrl}/send-message`, {
+        const response = await fetch(`${config.vpsApiUrl}/send-message`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -491,6 +397,25 @@ export default function TelegramManage() {
     }
   };
 
+  // Check if Telegram is active
+  if (!configLoading && !config.isActive) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center h-[60vh]">
+          <Card className="max-w-md">
+            <CardContent className="pt-6 text-center space-y-4">
+              <AlertCircle className="h-16 w-16 text-yellow-500 mx-auto" />
+              <h2 className="text-xl font-semibold">Telegram Features Disabled</h2>
+              <p className="text-muted-foreground">
+                Telegram features are currently disabled by the administrator. Please contact support for more information.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -498,301 +423,286 @@ export default function TelegramManage() {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-foreground">Telegram Manage</h1>
-            <p className="text-muted-foreground">Manage your Telegram sessions and send bulk messages</p>
+            <p className="text-muted-foreground">Manage sessions, send messages, track replies</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => setUploadOpen(true)} className="gap-2">
+          <div className="flex gap-2">
+            <Button onClick={() => setAddSessionOpen(true)} className="gap-2">
               <Plus className="h-4 w-4" />
               Add Session
             </Button>
-            {selectedSessions.size > 0 && (
-              <>
-                <Button onClick={() => setBulkMessageOpen(true)} variant="secondary" className="gap-2">
-                  <Send className="h-4 w-4" />
-                  Send Message ({selectedSessions.size})
-                </Button>
-                <Button onClick={handleExportCSV} variant="outline" className="gap-2">
-                  <Download className="h-4 w-4" />
-                  Export CSV
-                </Button>
-                <Button onClick={() => setDeleteConfirmOpen(true)} variant="destructive" className="gap-2">
-                  <Trash2 className="h-4 w-4" />
-                  Delete ({selectedSessions.size})
-                </Button>
-              </>
-            )}
           </div>
         </div>
 
-        {/* Tabs */}
-        <Tabs defaultValue="sessions" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="sessions">Sessions</TabsTrigger>
-            <TabsTrigger value="api-settings">API Settings</TabsTrigger>
-          </TabsList>
+        {/* Stats Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-2xl font-bold">{sessions.length}</div>
+              <div className="text-xs text-muted-foreground">Total Sessions</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-2xl font-bold text-green-500">
+                {sessions.filter(s => s.status === 'active').length}
+              </div>
+              <div className="text-xs text-muted-foreground">Active</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-2xl font-bold text-blue-500">
+                {sessions.reduce((sum, s) => sum + (s.messages_sent || 0), 0)}
+              </div>
+              <div className="text-xs text-muted-foreground">Messages Sent</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-2xl font-bold text-purple-500">
+                {sessions.reduce((sum, s) => sum + (s.replies_received || 0), 0)}
+              </div>
+              <div className="text-xs text-muted-foreground">Replies</div>
+            </CardContent>
+          </Card>
+        </div>
 
-          <TabsContent value="sessions" className="space-y-4">
-            {/* Search */}
-            <div className="flex gap-2">
-              <Input
-                placeholder="Search by phone number..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="max-w-sm"
-              />
-            </div>
+        {/* Action Bar */}
+        <div className="flex flex-wrap gap-2 items-center">
+          <Input
+            placeholder="Search by phone number..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="max-w-xs"
+          />
+          
+          {selectedSessions.size > 0 && (
+            <>
+              <Button onClick={() => setBulkMessageOpen(true)} variant="outline" className="gap-2">
+                <Send className="h-4 w-4" />
+                Send Message ({selectedSessions.size})
+              </Button>
+              <Button onClick={handleExportCSV} variant="outline" className="gap-2">
+                <Download className="h-4 w-4" />
+                Export
+              </Button>
+              <Button onClick={() => setDeleteConfirmOpen(true)} variant="destructive" className="gap-2">
+                <Trash2 className="h-4 w-4" />
+                Delete ({selectedSessions.size})
+              </Button>
+            </>
+          )}
+        </div>
 
-            {/* Sessions Table */}
-            <Card>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-12">
-                        <Checkbox
-                          checked={filteredSessions.length > 0 && selectedSessions.size === filteredSessions.length}
-                          onCheckedChange={handleSelectAll}
-                        />
-                      </TableHead>
-                      <TableHead>#</TableHead>
-                      <TableHead>Phone Number</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Proxy</TableHead>
-                      <TableHead>Messages Sent</TableHead>
-                      <TableHead>Replies</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {loading ? (
-                      <TableRow>
-                        <TableCell colSpan={8} className="text-center py-8">
-                          <Loader2 className="h-6 w-6 animate-spin mx-auto" />
-                        </TableCell>
-                      </TableRow>
-                    ) : filteredSessions.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
-                          No sessions found. Add your first session.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      filteredSessions.map((session, index) => (
-                        <TableRow key={session.id}>
-                          <TableCell>
-                            <Checkbox
-                              checked={selectedSessions.has(session.id)}
-                              onCheckedChange={(checked) => handleSelectSession(session.id, !!checked)}
-                            />
-                          </TableCell>
-                          <TableCell>{index + 1}</TableCell>
-                          <TableCell className="font-medium">{session.phone_number}</TableCell>
-                          <TableCell>{getStatusBadge(session.status)}</TableCell>
-                          <TableCell>
-                            {session.proxy_host ? (
-                              <span className="text-xs text-muted-foreground">
-                                {session.proxy_host}:{session.proxy_port}
-                              </span>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">No proxy</span>
-                            )}
-                          </TableCell>
-                          <TableCell>{session.messages_sent || 0}</TableCell>
-                          <TableCell>{session.replies_received || 0}</TableCell>
-                          <TableCell>
-                            <div className="flex gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => openEditProxy(session)}
-                                title="Edit Proxy"
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleDeleteSession(session)}
-                                className="text-destructive hover:text-destructive"
-                                title="Delete"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="api-settings" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Server className="h-5 w-5" />
-                  Python API Configuration
-                </CardTitle>
-                <CardDescription>Configure your VPS Python API server for Telegram operations</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="p-4 bg-muted/50 rounded-lg border border-border space-y-3">
-                  <h4 className="font-medium">📋 VPS Setup Guide</h4>
-                  <div className="space-y-2 text-sm text-muted-foreground">
-                    <p><strong>1. Buy VPS:</strong> DigitalOcean, Vultr, or Hetzner ($5-10/mo)</p>
-                    <p><strong>2. OS:</strong> Ubuntu 22.04 LTS</p>
-                    <p><strong>3. RAM:</strong> Minimum 1GB (2GB recommended for many sessions)</p>
-                    <p><strong>4. Deploy:</strong> Clone repo and run docker-compose up -d</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => copyToClipboard("https://github.com/your-repo/telegram-api-server")}
-                    >
-                      <Copy className="h-4 w-4 mr-1" />
-                      Copy Repo URL
-                    </Button>
-                    <Button variant="outline" size="sm" asChild>
-                      <a href="https://docs.digitalocean.com/products/droplets/quickstart/" target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="h-4 w-4 mr-1" />
-                        VPS Guide
-                      </a>
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Python API URL</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="http://your-vps-ip:8000"
-                      value={pythonApiUrl}
-                      onChange={(e) => handleApiUrlChange(e.target.value)}
+        {/* Sessions Table */}
+        <Card>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-12">
+                    <Checkbox
+                      checked={selectedSessions.size === filteredSessions.length && filteredSessions.length > 0}
+                      onCheckedChange={handleSelectAll}
                     />
-                    <Button onClick={handleCheckConnection} disabled={isChecking}>
-                      {isChecking ? "Checking..." : "Check"}
-                    </Button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground">Status:</span>
-                    <Badge
-                      className={
-                        apiStatus === "online"
-                          ? "bg-green-500/20 text-green-400 border-green-500/30"
-                          : apiStatus === "offline"
-                          ? "bg-red-500/20 text-red-400 border-red-500/30"
-                          : "bg-gray-500/20 text-gray-400 border-gray-500/30"
-                      }
-                    >
-                      {apiStatus === "online" && <Check className="h-3 w-3 mr-1" />}
-                      {apiStatus === "offline" && <X className="h-3 w-3 mr-1" />}
-                      {apiStatus === "unknown" ? "Not checked" : apiStatus}
-                    </Badge>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-primary/10 border border-primary/20 rounded-lg">
-                  <h4 className="font-medium mb-2">🔑 Info after VPS setup:</h4>
-                  <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-                    <li><strong>API URL:</strong> http://YOUR_VPS_IP:8000</li>
-                    <li><strong>Proxy format:</strong> host:port:username:password (per session)</li>
-                    <li><strong>Session files:</strong> .session files from Telethon/Pyrogram</li>
-                  </ul>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+                  </TableHead>
+                  <TableHead>#</TableHead>
+                  <TableHead>Phone Number</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Proxy</TableHead>
+                  <TableHead>Messages</TableHead>
+                  <TableHead>Replies</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="text-center py-8">
+                      <Loader2 className="h-6 w-6 animate-spin mx-auto" />
+                    </TableCell>
+                  </TableRow>
+                ) : filteredSessions.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                      No sessions found. Add your first session to get started.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredSessions.map((session, index) => (
+                    <TableRow key={session.id}>
+                      <TableCell>
+                        <Checkbox
+                          checked={selectedSessions.has(session.id)}
+                          onCheckedChange={(checked) => handleSelectSession(session.id, !!checked)}
+                        />
+                      </TableCell>
+                      <TableCell>{index + 1}</TableCell>
+                      <TableCell className="font-medium">{session.phone_number}</TableCell>
+                      <TableCell>{getStatusBadge(session.status)}</TableCell>
+                      <TableCell>
+                        {session.proxy_host ? (
+                          <span className="text-xs text-muted-foreground">
+                            {session.proxy_host}:{session.proxy_port}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">No proxy</span>
+                        )}
+                      </TableCell>
+                      <TableCell>{session.messages_sent || 0}</TableCell>
+                      <TableCell>{session.replies_received || 0}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {new Date(session.created_at).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleValidateSession(session)}
+                            title="Validate"
+                          >
+                            <RefreshCw className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => openEditProxy(session)}
+                            title="Edit Proxy"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleDeleteSession(session)}
+                            title="Delete"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Upload Session Dialog */}
-      <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
-        <DialogContent className="sm:max-w-md">
+      {/* Add Session Dialog */}
+      <Dialog open={addSessionOpen} onOpenChange={setAddSessionOpen}>
+        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Upload Telegram Sessions</DialogTitle>
-            <DialogDescription>Upload .session files from Telethon/Pyrogram</DialogDescription>
+            <DialogTitle>Add Telegram Session</DialogTitle>
+            <DialogDescription>Add session via phone verification or file upload</DialogDescription>
           </DialogHeader>
+          
+          <Tabs defaultValue="phone" className="space-y-4">
+            <TabsList className="grid grid-cols-2">
+              <TabsTrigger value="phone">Phone Verification</TabsTrigger>
+              <TabsTrigger value="upload">Session File Upload</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="phone">
+              <PhoneVerification
+                vpsApiUrl={config.vpsApiUrl}
+                apiId={config.apiId}
+                apiHash={config.apiHash}
+                onSessionAdded={() => {
+                  fetchSessions();
+                  setAddSessionOpen(false);
+                }}
+              />
+            </TabsContent>
+
+            <TabsContent value="upload">
+              <SessionUpload onSessionAdded={() => {
+                fetchSessions();
+                setAddSessionOpen(false);
+              }} />
+            </TabsContent>
+          </Tabs>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Message Dialog */}
+      <Dialog open={bulkMessageOpen} onOpenChange={setBulkMessageOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Bulk Send Message</DialogTitle>
+            <DialogDescription>Send messages using {selectedSessions.size} selected session(s)</DialogDescription>
+          </DialogHeader>
+          
           <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Session Files (.session)</Label>
-              <Input
-                type="file"
-                accept=".session"
-                multiple
-                onChange={(e) => setUploadFiles(e.target.files)}
+            <div>
+              <Label>Usernames (one per line)</Label>
+              <Textarea
+                placeholder="@username1&#10;@username2&#10;user_id_123"
+                value={usernames}
+                onChange={(e) => setUsernames(e.target.value)}
+                rows={5}
+                disabled={sending}
               />
             </div>
             
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-2">
-                <Label>Proxy Host</Label>
-                <Input
-                  placeholder="proxy.example.com"
-                  value={proxyHost}
-                  onChange={(e) => setProxyHost(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Proxy Port</Label>
-                <Input
-                  placeholder="1080"
-                  value={proxyPort}
-                  onChange={(e) => setProxyPort(e.target.value)}
-                />
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-2">
-                <Label>Proxy Username</Label>
-                <Input
-                  placeholder="username"
-                  value={proxyUsername}
-                  onChange={(e) => setProxyUsername(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Proxy Password</Label>
-                <Input
-                  type="password"
-                  placeholder="password"
-                  value={proxyPassword}
-                  onChange={(e) => setProxyPassword(e.target.value)}
-                />
-              </div>
+            <div>
+              <Label>Message Content</Label>
+              <Textarea
+                placeholder="Your message here..."
+                value={messageContent}
+                onChange={(e) => setMessageContent(e.target.value)}
+                rows={4}
+                disabled={sending}
+              />
             </div>
 
-            <Button onClick={handleFileUpload} disabled={uploading} className="w-full">
-              {uploading ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Uploading...
-                </>
-              ) : (
-                <>
-                  <Upload className="h-4 w-4 mr-2" />
-                  Upload Sessions
-                </>
-              )}
-            </Button>
+            {sending && (
+              <div className="space-y-2">
+                <Progress value={sendProgress} />
+                <p className="text-sm text-center text-muted-foreground">
+                  Sending... {Math.round(sendProgress)}%
+                </p>
+              </div>
+            )}
+
+            {sendReport && (
+              <div className="p-4 bg-muted rounded-lg space-y-2">
+                <p className="font-medium">Send Report</p>
+                <div className="grid grid-cols-3 gap-2 text-sm">
+                  <div className="text-green-500">✓ Success: {sendReport.success}</div>
+                  <div className="text-red-500">✗ Failed: {sendReport.failed}</div>
+                  <div>Total: {sendReport.total}</div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setBulkMessageOpen(false)} disabled={sending}>
+                Cancel
+              </Button>
+              <Button onClick={handleBulkMessage} disabled={sending} className="gap-2">
+                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                Send Messages
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
 
       {/* Edit Proxy Dialog */}
       <Dialog open={editProxyOpen} onOpenChange={setEditProxyOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Proxy Settings</DialogTitle>
             <DialogDescription>Update proxy for {editingSession?.phone_number}</DialogDescription>
           </DialogHeader>
+          
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
                 <Label>Proxy Host</Label>
                 <Input
                   placeholder="proxy.example.com"
@@ -800,27 +710,25 @@ export default function TelegramManage() {
                   onChange={(e) => setEditProxyHost(e.target.value)}
                 />
               </div>
-              <div className="space-y-2">
+              <div>
                 <Label>Proxy Port</Label>
                 <Input
+                  type="number"
                   placeholder="1080"
                   value={editProxyPort}
                   onChange={(e) => setEditProxyPort(e.target.value)}
                 />
               </div>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-2">
-                <Label>Proxy Username</Label>
+              <div>
+                <Label>Username</Label>
                 <Input
                   placeholder="username"
                   value={editProxyUsername}
                   onChange={(e) => setEditProxyUsername(e.target.value)}
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Proxy Password</Label>
+              <div>
+                <Label>Password</Label>
                 <Input
                   type="password"
                   placeholder="password"
@@ -830,89 +738,14 @@ export default function TelegramManage() {
               </div>
             </div>
 
-            <Button onClick={handleSaveProxy} disabled={savingProxy} className="w-full">
-              {savingProxy ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                'Save Proxy Settings'
-              )}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Bulk Message Dialog */}
-      <Dialog open={bulkMessageOpen} onOpenChange={setBulkMessageOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Send Bulk Messages</DialogTitle>
-            <DialogDescription>
-              Send messages to multiple users using {selectedSessions.size} selected session(s)
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Usernames (one per line)</Label>
-              <Textarea
-                placeholder="username1
-username2
-username3"
-                value={usernames}
-                onChange={(e) => setUsernames(e.target.value)}
-                rows={5}
-              />
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setEditProxyOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveProxy} disabled={savingProxy}>
+                {savingProxy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+              </Button>
             </div>
-            
-            <div className="space-y-2">
-              <Label>Message</Label>
-              <Textarea
-                placeholder="Your message here..."
-                value={messageContent}
-                onChange={(e) => setMessageContent(e.target.value)}
-                rows={3}
-              />
-            </div>
-
-            {sending && (
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span>Sending...</span>
-                  <span>{Math.round(sendProgress)}%</span>
-                </div>
-                <Progress value={sendProgress} />
-              </div>
-            )}
-
-            {sendReport && (
-              <div className="p-3 bg-muted rounded-lg space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-green-400">Success: {sendReport.success}</span>
-                  <span className="text-red-400">Failed: {sendReport.failed}</span>
-                  <span>Total: {sendReport.total}</span>
-                </div>
-              </div>
-            )}
-
-            <Button 
-              onClick={handleBulkMessage} 
-              disabled={sending} 
-              className="w-full"
-            >
-              {sending ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Sending...
-                </>
-              ) : (
-                <>
-                  <Send className="h-4 w-4 mr-2" />
-                  Send Messages
-                </>
-              )}
-            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -926,23 +759,13 @@ username3"
               Are you sure you want to delete {selectedSessions.size} session(s)? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex justify-end gap-2">
+          
+          <div className="flex gap-2 justify-end">
             <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
               Cancel
             </Button>
-            <Button 
-              variant="destructive" 
-              onClick={handleBulkDelete}
-              disabled={bulkDeleting}
-            >
-              {bulkDeleting ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                'Delete'
-              )}
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={bulkDeleting}>
+              {bulkDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete'}
             </Button>
           </div>
         </DialogContent>
