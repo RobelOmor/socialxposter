@@ -202,29 +202,32 @@ export default function TelegramManage() {
     setSavingProxy(false);
   };
 
+  // Helper to call VPS via proxy
+  const callVpsProxy = async (endpoint: string, body: any) => {
+    const { data, error } = await supabase.functions.invoke("telegram-vps-proxy", {
+      body: {
+        endpoint,
+        method: "POST",
+        body
+      }
+    });
+    
+    if (error) throw error;
+    return data;
+  };
+
   // Validate session
   const handleValidateSession = async (session: TelegramSession) => {
-    if (!config.vpsApiUrl) {
-      toast.error('VPS API not configured. Contact admin.');
-      return;
-    }
-
     try {
-      const response = await fetch(`${config.vpsApiUrl}/validate-session`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_data: session.session_data,
-          proxy: session.proxy_host ? {
-            host: session.proxy_host,
-            port: session.proxy_port,
-            username: session.proxy_username,
-            password: session.proxy_password,
-          } : null,
-        }),
+      const data = await callVpsProxy("/validate-session", {
+        session_data: session.session_data,
+        proxy: session.proxy_host ? {
+          host: session.proxy_host,
+          port: session.proxy_port,
+          username: session.proxy_username,
+          password: session.proxy_password,
+        } : null,
       });
-
-      const data = await response.json();
 
       if (data.success && data.authorized) {
         await supabase
@@ -241,7 +244,7 @@ export default function TelegramManage() {
       }
       fetchSessions();
     } catch (error: any) {
-      toast.error('Failed to validate session');
+      toast.error(error.message || 'Failed to validate session');
     }
   };
 
@@ -257,10 +260,6 @@ export default function TelegramManage() {
     }
     if (!messageContent.trim()) {
       toast.error('Enter message content');
-      return;
-    }
-    if (!config.vpsApiUrl) {
-      toast.error('VPS API not configured. Contact admin.');
       return;
     }
 
@@ -280,23 +279,17 @@ export default function TelegramManage() {
       const session = selectedSessionsArray[i % selectedSessionsArray.length];
 
       try {
-        const response = await fetch(`${config.vpsApiUrl}/send-message`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            session_data: session.session_data,
-            destination: username,
-            message: messageContent,
-            proxy: session.proxy_host ? {
-              host: session.proxy_host,
-              port: session.proxy_port,
-              username: session.proxy_username,
-              password: session.proxy_password,
-            } : null,
-          }),
+        const data = await callVpsProxy("/send-message", {
+          session_data: session.session_data,
+          destination: username,
+          message: messageContent,
+          proxy: session.proxy_host ? {
+            host: session.proxy_host,
+            port: session.proxy_port,
+            username: session.proxy_username,
+            password: session.proxy_password,
+          } : null,
         });
-
-        const data = await response.json();
 
         if (data.success) {
           successCount++;
@@ -608,7 +601,6 @@ export default function TelegramManage() {
 
             <TabsContent value="phone">
               <PhoneVerification
-                vpsApiUrl={config.vpsApiUrl}
                 apiId={config.apiId}
                 apiHash={config.apiHash}
                 onSessionAdded={() => {
