@@ -4,7 +4,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { AdminTelegramConfig } from '@/components/telegram/AdminTelegramConfig';
@@ -14,16 +18,21 @@ import {
   X,
   MessageSquare,
   Users,
-  Settings
+  Settings,
+  Send
 } from 'lucide-react';
 
 interface TelegramSession {
   id: string;
   phone_number: string;
   session_name: string | null;
+  session_data: string;
+  telegram_name: string | null;
   status: string;
   proxy_host: string | null;
   proxy_port: number | null;
+  proxy_username: string | null;
+  proxy_password: string | null;
   messages_sent: number | null;
   replies_received: number | null;
   created_at: string;
@@ -49,6 +58,13 @@ export default function AdminTelegramSessions() {
     totalMessages: 0,
     totalReplies: 0,
   });
+  
+  // Send message dialog state
+  const [sendDialogOpen, setSendDialogOpen] = useState(false);
+  const [selectedSession, setSelectedSession] = useState<TelegramSession | null>(null);
+  const [targetUsername, setTargetUsername] = useState('');
+  const [messageContent, setMessageContent] = useState('');
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     fetchSessions();
@@ -99,6 +115,65 @@ export default function AdminTelegramSessions() {
         return <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">Suspended</Badge>;
       default:
         return <Badge className="bg-gray-500/20 text-gray-400 border-gray-500/30">{status}</Badge>;
+    }
+  };
+
+  const openSendDialog = (session: TelegramSession) => {
+    setSelectedSession(session);
+    setTargetUsername('');
+    setMessageContent('');
+    setSendDialogOpen(true);
+  };
+
+  const handleSendMessage = async () => {
+    if (!selectedSession || !targetUsername.trim() || !messageContent.trim()) {
+      toast.error('Please enter username and message');
+      return;
+    }
+
+    setSending(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('telegram-vps-proxy', {
+        body: {
+          endpoint: '/send-message',
+          method: 'POST',
+          body: {
+            session_data: selectedSession.session_data,
+            destination: targetUsername.trim(),
+            message: messageContent.trim(),
+            proxy: selectedSession.proxy_host ? {
+              host: selectedSession.proxy_host,
+              port: selectedSession.proxy_port,
+              username: selectedSession.proxy_username,
+              password: selectedSession.proxy_password,
+            } : null,
+          },
+        },
+      });
+
+      if (error) throw error;
+
+      if (data?.success) {
+        toast.success(`Message sent to ${targetUsername}`);
+        
+        // Update session message count
+        await supabase
+          .from('telegram_sessions')
+          .update({ 
+            messages_sent: (selectedSession.messages_sent || 0) + 1,
+            last_used_at: new Date().toISOString(),
+          })
+          .eq('id', selectedSession.id);
+        
+        setSendDialogOpen(false);
+        fetchSessions();
+      } else {
+        toast.error(data?.error || 'Failed to send message');
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to send message');
+    } finally {
+      setSending(false);
     }
   };
 
@@ -205,23 +280,25 @@ export default function AdminTelegramSessions() {
                     <TableRow>
                       <TableHead>#</TableHead>
                       <TableHead>Phone Number</TableHead>
+                      <TableHead>Telegram Name</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Proxy</TableHead>
                       <TableHead>Messages</TableHead>
                       <TableHead>Replies</TableHead>
                       <TableHead>Created</TableHead>
+                      <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {loading ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8">
+                        <TableCell colSpan={9} className="text-center py-8">
                           <Loader2 className="h-6 w-6 animate-spin mx-auto" />
                         </TableCell>
                       </TableRow>
                     ) : filteredSessions.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                           No sessions found.
                         </TableCell>
                       </TableRow>
@@ -230,6 +307,7 @@ export default function AdminTelegramSessions() {
                         <TableRow key={session.id}>
                           <TableCell>{index + 1}</TableCell>
                           <TableCell className="font-medium">{session.phone_number}</TableCell>
+                          <TableCell>{session.telegram_name || '-'}</TableCell>
                           <TableCell>{getStatusBadge(session.status)}</TableCell>
                           <TableCell>
                             {session.proxy_host ? (
@@ -245,6 +323,17 @@ export default function AdminTelegramSessions() {
                           <TableCell className="text-xs text-muted-foreground">
                             {new Date(session.created_at).toLocaleDateString()}
                           </TableCell>
+                          <TableCell>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => openSendDialog(session)}
+                              disabled={session.status !== 'active'}
+                              title="Send Message"
+                            >
+                              <Send className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       ))
                     )}
@@ -254,6 +343,49 @@ export default function AdminTelegramSessions() {
             </Card>
           </TabsContent>
         </Tabs>
+
+        {/* Send Message Dialog */}
+        <Dialog open={sendDialogOpen} onOpenChange={setSendDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Send Message</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="text-sm text-muted-foreground">
+                From: <span className="text-foreground font-medium">{selectedSession?.phone_number}</span>
+                {selectedSession?.telegram_name && (
+                  <span> ({selectedSession.telegram_name})</span>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label>Target Username</Label>
+                <Input
+                  placeholder="@username or user_id"
+                  value={targetUsername}
+                  onChange={(e) => setTargetUsername(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Message</Label>
+                <Textarea
+                  placeholder="Enter your message..."
+                  value={messageContent}
+                  onChange={(e) => setMessageContent(e.target.value)}
+                  rows={4}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSendDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSendMessage} disabled={sending}>
+                {sending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                Send
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </AdminLayout>
   );
