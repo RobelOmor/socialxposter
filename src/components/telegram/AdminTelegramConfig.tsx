@@ -24,7 +24,9 @@ export const AdminTelegramConfig = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [testingSession, setTestingSession] = useState(false);
   const [apiStatus, setApiStatus] = useState<"unknown" | "online" | "offline">("unknown");
+  const [testResult, setTestResult] = useState<string>("");
 
   // Form state
   const [vpsIp, setVpsIp] = useState("");
@@ -127,6 +129,60 @@ export const AdminTelegramConfig = () => {
     setTesting(false);
   };
 
+  const testSessionValidation = async () => {
+    setTestingSession(true);
+    setTestResult("");
+    
+    try {
+      // Get a test session from DB
+      const { data: sessions } = await supabase
+        .from("telegram_sessions")
+        .select("*")
+        .limit(1);
+      
+      if (!sessions || sessions.length === 0) {
+        setTestResult("No sessions found to test");
+        setTestingSession(false);
+        return;
+      }
+
+      const session = sessions[0];
+      console.log("Testing session:", session.phone_number);
+      
+      const { data, error } = await supabase.functions.invoke("telegram-vps-proxy", {
+        body: {
+          endpoint: "/validate-session",
+          method: "POST",
+          body: {
+            session_data: session.session_data,
+            phone_number: session.phone_number,
+            proxy: session.proxy_host ? {
+              host: session.proxy_host,
+              port: session.proxy_port,
+              username: session.proxy_username,
+              password: session.proxy_password,
+            } : null
+          }
+        }
+      });
+
+      console.log("VPS Response:", data);
+      setTestResult(JSON.stringify(data, null, 2));
+      
+      if (error) {
+        toast.error("Proxy error: " + error.message);
+      } else if (data?.valid) {
+        toast.success(`Session valid! User: ${data.user_name || data.first_name || 'Unknown'}`);
+      } else {
+        toast.warning("Session invalid: " + (data?.error || "Unknown error"));
+      }
+    } catch (error: any) {
+      setTestResult(`Error: ${error.message}`);
+      toast.error(error.message);
+    }
+    setTestingSession(false);
+  };
+
   if (loading) {
     return (
       <Card>
@@ -186,6 +242,33 @@ export const AdminTelegramConfig = () => {
                 : `✕ Cannot connect to http://${vpsIp}:8000`}
             </div>
           )}
+
+          <Separator className="my-4" />
+          
+          {/* Session Test */}
+          <div className="space-y-2">
+            <Label>Test Session Validation</Label>
+            <p className="text-xs text-muted-foreground">Test with a real session to debug validate-session endpoint</p>
+            <Button 
+              onClick={testSessionValidation} 
+              disabled={testingSession || apiStatus !== "online"} 
+              variant="secondary" 
+              className="gap-2"
+            >
+              {testingSession ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Test Session Validation
+            </Button>
+            
+            {testResult && (
+              <pre className="p-3 bg-muted rounded-lg text-xs overflow-auto max-h-48 mt-2">
+                {testResult}
+              </pre>
+            )}
+          </div>
         </CardContent>
       </Card>
 

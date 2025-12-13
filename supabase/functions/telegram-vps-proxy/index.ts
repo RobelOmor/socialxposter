@@ -73,7 +73,15 @@ serve(async (req) => {
     }
 
     const response = await fetch(vpsUrl, fetchOptions);
-    const data = await response.json();
+    const responseText = await response.text();
+    console.log(`VPS Response (${response.status}):`, responseText);
+    
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      data = { raw_response: responseText, parse_error: true };
+    }
 
     return new Response(
       JSON.stringify(data),
