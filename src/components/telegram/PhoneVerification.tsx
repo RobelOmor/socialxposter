@@ -8,13 +8,12 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
 interface PhoneVerificationProps {
-  vpsApiUrl: string;
   apiId: string;
   apiHash: string;
   onSessionAdded: () => void;
 }
 
-export const PhoneVerification = ({ vpsApiUrl, apiId, apiHash, onSessionAdded }: PhoneVerificationProps) => {
+export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerificationProps) => {
   const [step, setStep] = useState<"phone" | "code" | "password" | "success">("phone");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
@@ -28,36 +27,38 @@ export const PhoneVerification = ({ vpsApiUrl, apiId, apiHash, onSessionAdded }:
   const [proxyUsername, setProxyUsername] = useState("");
   const [proxyPassword, setProxyPassword] = useState("");
 
+  const callVpsProxy = async (endpoint: string, body: any) => {
+    const { data, error } = await supabase.functions.invoke("telegram-vps-proxy", {
+      body: {
+        endpoint,
+        method: "POST",
+        body
+      }
+    });
+    
+    if (error) throw error;
+    return data;
+  };
+
   const handleSendCode = async () => {
     if (!phoneNumber.trim()) {
       toast.error("Enter phone number");
       return;
     }
 
-    if (!vpsApiUrl) {
-      toast.error("VPS API not configured. Contact admin.");
-      return;
-    }
-
     setIsLoading(true);
     try {
-      const response = await fetch(`${vpsApiUrl}/send-code`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          phone_number: phoneNumber,
-          api_id: apiId,
-          api_hash: apiHash,
-          proxy: proxyHost ? {
-            host: proxyHost,
-            port: parseInt(proxyPort) || 1080,
-            username: proxyUsername || null,
-            password: proxyPassword || null,
-          } : null,
-        }),
+      const data = await callVpsProxy("/send-code", {
+        phone_number: phoneNumber,
+        api_id: apiId,
+        api_hash: apiHash,
+        proxy: proxyHost ? {
+          host: proxyHost,
+          port: parseInt(proxyPort) || 1080,
+          username: proxyUsername || null,
+          password: proxyPassword || null,
+        } : null,
       });
-
-      const data = await response.json();
 
       if (data.success) {
         setPhoneCodeHash(data.phone_code_hash);
@@ -80,25 +81,19 @@ export const PhoneVerification = ({ vpsApiUrl, apiId, apiHash, onSessionAdded }:
 
     setIsLoading(true);
     try {
-      const response = await fetch(`${vpsApiUrl}/verify-code`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          phone_number: phoneNumber,
-          phone_code: verificationCode,
-          phone_code_hash: phoneCodeHash,
-          api_id: apiId,
-          api_hash: apiHash,
-          proxy: proxyHost ? {
-            host: proxyHost,
-            port: parseInt(proxyPort) || 1080,
-            username: proxyUsername || null,
-            password: proxyPassword || null,
-          } : null,
-        }),
+      const data = await callVpsProxy("/verify-code", {
+        phone_number: phoneNumber,
+        phone_code: verificationCode,
+        phone_code_hash: phoneCodeHash,
+        api_id: apiId,
+        api_hash: apiHash,
+        proxy: proxyHost ? {
+          host: proxyHost,
+          port: parseInt(proxyPort) || 1080,
+          username: proxyUsername || null,
+          password: proxyPassword || null,
+        } : null,
       });
-
-      const data = await response.json();
 
       if (data.success) {
         // Save session to database
@@ -150,24 +145,18 @@ export const PhoneVerification = ({ vpsApiUrl, apiId, apiHash, onSessionAdded }:
 
     setIsLoading(true);
     try {
-      const response = await fetch(`${vpsApiUrl}/verify-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          phone_number: phoneNumber,
-          password: password,
-          api_id: apiId,
-          api_hash: apiHash,
-          proxy: proxyHost ? {
-            host: proxyHost,
-            port: parseInt(proxyPort) || 1080,
-            username: proxyUsername || null,
-            password: proxyPassword || null,
-          } : null,
-        }),
+      const data = await callVpsProxy("/verify-password", {
+        phone_number: phoneNumber,
+        password: password,
+        api_id: apiId,
+        api_hash: apiHash,
+        proxy: proxyHost ? {
+          host: proxyHost,
+          port: parseInt(proxyPort) || 1080,
+          username: proxyUsername || null,
+          password: proxyPassword || null,
+        } : null,
       });
-
-      const data = await response.json();
 
       if (data.success) {
         const { data: { user } } = await supabase.auth.getUser();

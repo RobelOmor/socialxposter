@@ -93,24 +93,36 @@ export const AdminTelegramConfig = () => {
       return;
     }
 
+    // First save the VPS IP
+    if (config) {
+      await supabase
+        .from("telegram_admin_config")
+        .update({ vps_ip: vpsIp })
+        .eq("id", config.id);
+    }
+
     setTesting(true);
     try {
-      const apiUrl = `http://${vpsIp}:8000`;
-      const response = await fetch(`${apiUrl}/health`, {
-        method: "GET",
-        mode: "cors",
+      // Use Edge Function proxy instead of direct HTTP call
+      const { data, error } = await supabase.functions.invoke("telegram-vps-proxy", {
+        body: {
+          endpoint: "/health",
+          method: "GET"
+        }
       });
 
-      if (response.ok) {
+      if (error) throw error;
+
+      if (data?.status === "ok") {
         setApiStatus("online");
         toast.success("VPS API is online!");
       } else {
         setApiStatus("offline");
         toast.error("API returned error");
       }
-    } catch (error) {
+    } catch (error: any) {
       setApiStatus("offline");
-      toast.error("Cannot connect to VPS API");
+      toast.error(error.message || "Cannot connect to VPS API");
     }
     setTesting(false);
   };
