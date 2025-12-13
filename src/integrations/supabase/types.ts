@@ -235,6 +235,42 @@ export type Database = {
         }
         Relationships: []
       }
+      telegram_admin_config: {
+        Row: {
+          api_hash: string | null
+          api_id: string | null
+          created_at: string
+          id: string
+          is_active: boolean | null
+          max_messages_per_day: number | null
+          max_sessions_per_user: number | null
+          updated_at: string
+          vps_ip: string | null
+        }
+        Insert: {
+          api_hash?: string | null
+          api_id?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          max_messages_per_day?: number | null
+          max_sessions_per_user?: number | null
+          updated_at?: string
+          vps_ip?: string | null
+        }
+        Update: {
+          api_hash?: string | null
+          api_id?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          max_messages_per_day?: number | null
+          max_sessions_per_user?: number | null
+          updated_at?: string
+          vps_ip?: string | null
+        }
+        Relationships: []
+      }
       telegram_auto_replies: {
         Row: {
           created_at: string
