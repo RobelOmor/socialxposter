@@ -235,11 +235,145 @@ export type Database = {
         }
         Relationships: []
       }
+      telegram_auto_replies: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean | null
+          name: string
+          reply_template: string
+          trigger_keywords: string[] | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          name: string
+          reply_template: string
+          trigger_keywords?: string[] | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          reply_template?: string
+          trigger_keywords?: string[] | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      telegram_messages: {
+        Row: {
+          created_at: string
+          destination: string
+          destination_type: string
+          error_message: string | null
+          id: string
+          message_content: string
+          sent_at: string | null
+          session_id: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          destination: string
+          destination_type?: string
+          error_message?: string | null
+          id?: string
+          message_content: string
+          sent_at?: string | null
+          session_id?: string | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          destination?: string
+          destination_type?: string
+          error_message?: string | null
+          id?: string
+          message_content?: string
+          sent_at?: string | null
+          session_id?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "telegram_messages_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "telegram_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      telegram_replies: {
+        Row: {
+          created_at: string
+          from_user: string
+          from_user_id: string | null
+          id: string
+          message_content: string
+          replied: boolean | null
+          replied_at: string | null
+          reply_content: string | null
+          session_id: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          from_user: string
+          from_user_id?: string | null
+          id?: string
+          message_content: string
+          replied?: boolean | null
+          replied_at?: string | null
+          reply_content?: string | null
+          session_id?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          from_user?: string
+          from_user_id?: string | null
+          id?: string
+          message_content?: string
+          replied?: boolean | null
+          replied_at?: string | null
+          reply_content?: string | null
+          session_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "telegram_replies_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "telegram_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       telegram_sessions: {
         Row: {
           created_at: string
           id: string
+          last_used_at: string | null
+          messages_sent: number | null
           phone_number: string
+          proxy_host: string | null
+          proxy_password: string | null
+          proxy_port: number | null
+          proxy_username: string | null
+          replies_received: number | null
           session_data: string
           session_name: string | null
           status: string
@@ -249,7 +383,14 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          last_used_at?: string | null
+          messages_sent?: number | null
           phone_number: string
+          proxy_host?: string | null
+          proxy_password?: string | null
+          proxy_port?: number | null
+          proxy_username?: string | null
+          replies_received?: number | null
           session_data: string
           session_name?: string | null
           status?: string
@@ -259,7 +400,14 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          last_used_at?: string | null
+          messages_sent?: number | null
           phone_number?: string
+          proxy_host?: string | null
+          proxy_password?: string | null
+          proxy_port?: number | null
+          proxy_username?: string | null
+          replies_received?: number | null
           session_data?: string
           session_name?: string | null
           status?: string
