@@ -35,9 +35,19 @@ serve(async (req) => {
       );
     }
 
-    const vpsBaseUrl = config.vps_ip.startsWith('http') 
-      ? config.vps_ip 
-      : `http://${config.vps_ip}:8000`;
+    // Determine the base URL - don't add port for URLs that already include scheme
+    // (like ngrok URLs which already route to the correct port)
+    let vpsBaseUrl: string;
+    if (config.vps_ip.startsWith('http://') || config.vps_ip.startsWith('https://')) {
+      // Full URL provided (e.g., https://xxx.ngrok-free.app) - use as-is without port
+      vpsBaseUrl = config.vps_ip.replace(/\/$/, ''); // Remove trailing slash if any
+    } else if (config.vps_ip.includes('.ngrok') || config.vps_ip.includes('ngrok-free.app')) {
+      // Ngrok domain without scheme - add https, no port needed
+      vpsBaseUrl = `https://${config.vps_ip}`.replace(/\/$/, '');
+    } else {
+      // Regular IP address - add http and port 8000
+      vpsBaseUrl = `http://${config.vps_ip}:8000`;
+    }
 
     const { endpoint, method = 'GET', body } = await req.json();
 
