@@ -117,9 +117,9 @@ export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerif
         // Show confirmation step with user info
         setSessionData({
           session_data: data.session_data,
-          user_name: data.user_name || data.username || data.name || null,
+          user_name: data.telegram_name || data.user_name || data.username || data.name || null,
           first_name: data.first_name || null,
-          phone: data.phone || phoneNumber,
+          phone: data.phone || data.phone_number || phoneNumber,
         });
         setStep("confirm");
         toast.success("Verified! Please confirm to save session.");
