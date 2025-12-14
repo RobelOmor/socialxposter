@@ -50,11 +50,11 @@ interface TelegramSession {
 
 interface UnreadMessage {
   chat_id: number | string;
-  from_user: string;
+  from_user_name: string;
   from_user_id: number | string;
-  message: string;
+  text: string;
+  message_id: number;
   date: string;
-  unread_count: number;
 }
 
 export default function TelegramManage() {
@@ -333,7 +333,7 @@ export default function TelegramManage() {
       });
 
       if (data && (data.success || data.status === "ok")) {
-        toast.success(`Reply sent to ${replyingTo.from_user}`);
+        toast.success(`Reply sent to ${replyingTo.from_user_name}`);
         
         // Update session stats
         await supabase
@@ -1087,12 +1087,12 @@ export default function TelegramManage() {
                     className={`p-3 rounded-lg border ${replyingTo?.chat_id === msg.chat_id ? 'border-primary bg-primary/5' : 'bg-muted/50'}`}
                   >
                     <div className="flex justify-between items-start mb-2">
-                      <div className="font-medium text-sm">{msg.from_user}</div>
+                      <div className="font-medium text-sm text-primary">{msg.from_user_name || 'Unknown'}</div>
                       <div className="text-xs text-muted-foreground">
-                        {msg.date ? new Date(msg.date).toLocaleString() : ''}
+                        {msg.date || ''}
                       </div>
                     </div>
-                    <p className="text-sm mb-3 whitespace-pre-wrap">{msg.message}</p>
+                    <p className="text-sm mb-3 whitespace-pre-wrap bg-background/50 p-2 rounded">{msg.text}</p>
                     
                     {replyingTo?.chat_id === msg.chat_id ? (
                       <div className="space-y-2">
@@ -1135,7 +1135,10 @@ export default function TelegramManage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => setReplyingTo(msg)}
+                        onClick={() => {
+                          setReplyingTo(msg);
+                          setReplyContent('');
+                        }}
                         className="gap-1"
                       >
                         <MessageSquare className="h-3 w-3" />
