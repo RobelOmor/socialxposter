@@ -104,23 +104,36 @@ export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerif
         proxy: getProxyConfig(),
       });
 
-      if (data.success) {
+      console.log("Verify code response:", JSON.stringify(data, null, 2));
+
+      // Handle various success response formats from VPS
+      const isSuccess = data.success === true || data.status === "ok" || data.session_data;
+      const needsPassword = data.requires_password || data.password_required || data.need_password;
+      
+      if (needsPassword) {
+        setStep("password");
+        toast.info("2FA password required");
+      } else if (isSuccess && data.session_data) {
         // Show confirmation step with user info
         setSessionData({
           session_data: data.session_data,
-          user_name: data.user_name || null,
+          user_name: data.user_name || data.username || data.name || null,
           first_name: data.first_name || null,
           phone: data.phone || phoneNumber,
         });
         setStep("confirm");
         toast.success("Verified! Please confirm to save session.");
-      } else if (data.requires_password) {
-        setStep("password");
-        toast.info("2FA password required");
+      } else if (isSuccess && !data.session_data) {
+        // VPS returned success but no session data - might need to check status
+        toast.error("Verification succeeded but no session data returned. Check VPS logs.");
+        console.error("Missing session_data in response:", data);
       } else {
-        toast.error(data.error || "Verification failed");
+        const errorMsg = data.error || data.message || data.detail || "Verification failed";
+        toast.error(typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg));
+        console.error("Verification failed:", data);
       }
     } catch (error: any) {
+      console.error("Verify code error:", error);
       toast.error(error.message || "Verification failed");
     }
     setIsLoading(false);
