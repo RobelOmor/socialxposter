@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -25,7 +26,8 @@ import {
   Download,
   Pencil,
   MessageSquare,
-  AlertCircle
+  AlertCircle,
+  Mail
 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 
@@ -44,6 +46,15 @@ interface TelegramSession {
   replies_received: number | null;
   created_at: string;
   last_used_at: string | null;
+}
+
+interface UnreadMessage {
+  chat_id: number | string;
+  from_user: string;
+  from_user_id: number | string;
+  message: string;
+  date: string;
+  unread_count: number;
 }
 
 export default function TelegramManage() {
@@ -87,6 +98,16 @@ export default function TelegramManage() {
   // Bulk delete state
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  // Unread messages state
+  const [unreadDialogOpen, setUnreadDialogOpen] = useState(false);
+  const [unreadSession, setUnreadSession] = useState<TelegramSession | null>(null);
+  const [unreadMessages, setUnreadMessages] = useState<UnreadMessage[]>([]);
+  const [unreadLoading, setUnreadLoading] = useState(false);
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  const [replyContent, setReplyContent] = useState('');
+  const [replyingTo, setReplyingTo] = useState<UnreadMessage | null>(null);
+  const [sendingReply, setSendingReply] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -222,6 +243,123 @@ export default function TelegramManage() {
     
     if (error) throw error;
     return data;
+  };
+
+  // Fetch unread count for a session
+  const fetchUnreadCount = async (session: TelegramSession) => {
+    try {
+      const data = await callVpsProxy("/get-unread", {
+        session_data: session.session_data,
+        api_id: config.apiId,
+        api_hash: config.apiHash,
+        proxy: session.proxy_host ? {
+          host: session.proxy_host,
+          port: session.proxy_port,
+          username: session.proxy_username,
+          password: session.proxy_password,
+        } : null,
+      });
+      
+      if (data && data.total_unread !== undefined) {
+        setUnreadCounts(prev => ({ ...prev, [session.id]: data.total_unread }));
+      }
+    } catch (error) {
+      console.error("Failed to fetch unread count:", error);
+    }
+  };
+
+  // Fetch all unread counts on load
+  useEffect(() => {
+    if (sessions.length > 0 && config.apiId) {
+      sessions.filter(s => s.status === 'active').forEach(session => {
+        fetchUnreadCount(session);
+      });
+    }
+  }, [sessions, config.apiId]);
+
+  // Open unread messages dialog
+  const openUnreadDialog = async (session: TelegramSession) => {
+    setUnreadSession(session);
+    setUnreadMessages([]);
+    setUnreadDialogOpen(true);
+    setUnreadLoading(true);
+    setReplyingTo(null);
+    setReplyContent('');
+
+    try {
+      const data = await callVpsProxy("/get-unread", {
+        session_data: session.session_data,
+        api_id: config.apiId,
+        api_hash: config.apiHash,
+        proxy: session.proxy_host ? {
+          host: session.proxy_host,
+          port: session.proxy_port,
+          username: session.proxy_username,
+          password: session.proxy_password,
+        } : null,
+      });
+
+      if (data && data.messages) {
+        setUnreadMessages(data.messages);
+        setUnreadCounts(prev => ({ ...prev, [session.id]: data.total_unread || 0 }));
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to fetch unread messages");
+    }
+    setUnreadLoading(false);
+  };
+
+  // Send reply to a message
+  const handleSendReply = async () => {
+    if (!unreadSession || !replyingTo || !replyContent.trim()) {
+      toast.error("Enter a reply message");
+      return;
+    }
+
+    setSendingReply(true);
+    try {
+      const data = await callVpsProxy("/reply-message", {
+        session_data: unreadSession.session_data,
+        chat_id: replyingTo.chat_id,
+        message: replyContent.trim(),
+        api_id: config.apiId,
+        api_hash: config.apiHash,
+        proxy: unreadSession.proxy_host ? {
+          host: unreadSession.proxy_host,
+          port: unreadSession.proxy_port,
+          username: unreadSession.proxy_username,
+          password: unreadSession.proxy_password,
+        } : null,
+      });
+
+      if (data && (data.success || data.status === "ok")) {
+        toast.success(`Reply sent to ${replyingTo.from_user}`);
+        
+        // Update session stats
+        await supabase
+          .from('telegram_sessions')
+          .update({
+            messages_sent: (unreadSession.messages_sent || 0) + 1,
+            last_used_at: new Date().toISOString(),
+          })
+          .eq('id', unreadSession.id);
+
+        // Remove the message from list
+        setUnreadMessages(prev => prev.filter(m => m.chat_id !== replyingTo.chat_id));
+        setUnreadCounts(prev => ({ 
+          ...prev, 
+          [unreadSession.id]: Math.max(0, (prev[unreadSession.id] || 1) - 1) 
+        }));
+        setReplyingTo(null);
+        setReplyContent('');
+        fetchSessions();
+      } else {
+        throw new Error(data?.error || "Failed to send reply");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to send reply");
+    }
+    setSendingReply(false);
   };
 
   // Validate session
@@ -620,7 +758,20 @@ export default function TelegramManage() {
                         )}
                       </TableCell>
                       <TableCell>{session.messages_sent || 0}</TableCell>
-                      <TableCell>{session.replies_received || 0}</TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1 px-2 h-auto py-1"
+                          disabled={session.status !== 'active'}
+                          onClick={() => openUnreadDialog(session)}
+                        >
+                          <Mail className="h-3 w-3" />
+                          <span className={unreadCounts[session.id] > 0 ? "text-primary font-medium" : ""}>
+                            {unreadCounts[session.id] !== undefined ? unreadCounts[session.id] : '-'}
+                          </span>
+                        </Button>
+                      </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {new Date(session.created_at).toLocaleDateString()}
                       </TableCell>
@@ -903,6 +1054,99 @@ export default function TelegramManage() {
               {bulkDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete'}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Unread Messages Dialog */}
+      <Dialog open={unreadDialogOpen} onOpenChange={setUnreadDialogOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5" />
+              Unread Messages
+            </DialogTitle>
+            <DialogDescription>
+              Session: {unreadSession?.phone_number} ({unreadSession?.telegram_name || 'Unknown'})
+            </DialogDescription>
+          </DialogHeader>
+          
+          {unreadLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin" />
+            </div>
+          ) : unreadMessages.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              No unread messages
+            </div>
+          ) : (
+            <ScrollArea className="max-h-[400px] pr-4">
+              <div className="space-y-3">
+                {unreadMessages.map((msg, idx) => (
+                  <div 
+                    key={idx} 
+                    className={`p-3 rounded-lg border ${replyingTo?.chat_id === msg.chat_id ? 'border-primary bg-primary/5' : 'bg-muted/50'}`}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="font-medium text-sm">{msg.from_user}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {msg.date ? new Date(msg.date).toLocaleString() : ''}
+                      </div>
+                    </div>
+                    <p className="text-sm mb-3 whitespace-pre-wrap">{msg.message}</p>
+                    
+                    {replyingTo?.chat_id === msg.chat_id ? (
+                      <div className="space-y-2">
+                        <Textarea
+                          placeholder="Type your reply..."
+                          value={replyContent}
+                          onChange={(e) => setReplyContent(e.target.value)}
+                          rows={2}
+                          disabled={sendingReply}
+                          className="text-sm"
+                        />
+                        <div className="flex gap-2 justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setReplyingTo(null);
+                              setReplyContent('');
+                            }}
+                            disabled={sendingReply}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={handleSendReply}
+                            disabled={sendingReply || !replyContent.trim()}
+                            className="gap-1"
+                          >
+                            {sendingReply ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Send className="h-3 w-3" />
+                            )}
+                            Send
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setReplyingTo(msg)}
+                        className="gap-1"
+                      >
+                        <MessageSquare className="h-3 w-3" />
+                        Reply
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
         </DialogContent>
       </Dialog>
     </DashboardLayout>
