@@ -300,7 +300,12 @@ export default function TelegramManage() {
       });
 
       if (data && data.messages) {
-        setUnreadMessages(data.messages);
+        // Map from_user_id to chat_id for reply functionality
+        const mappedMessages = data.messages.map((msg: any) => ({
+          ...msg,
+          chat_id: msg.chat_id || msg.from_user_id, // Use from_user_id as chat_id for private chats
+        }));
+        setUnreadMessages(mappedMessages);
         setUnreadCounts(prev => ({ ...prev, [session.id]: data.total_unread || 0 }));
       }
     } catch (error: any) {
