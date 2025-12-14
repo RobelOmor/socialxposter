@@ -323,9 +323,14 @@ export default function TelegramManage() {
 
     setSendingReply(true);
     try {
+      // Parse chat_id as integer - Telegram requires numeric peer IDs
+      const chatId = typeof replyingTo.chat_id === 'string' 
+        ? parseInt(replyingTo.chat_id, 10) 
+        : replyingTo.chat_id;
+      
       const data = await callVpsProxy("/reply-message", {
         session_data: unreadSession.session_data,
-        chat_id: replyingTo.chat_id,
+        chat_id: chatId,
         message: replyContent.trim(),
         api_id: config.apiId,
         api_hash: config.apiHash,
