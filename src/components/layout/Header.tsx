@@ -1,9 +1,10 @@
-import { Bell, Search, Menu, Sparkles } from 'lucide-react';
+import { Bell, Search, Menu, Sparkles, Moon, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
+import { useEffect, useState } from 'react';
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -11,12 +12,27 @@ interface HeaderProps {
 
 export function Header({ onMenuClick }: HeaderProps) {
   const { profile } = useAuth();
+  const [isDark, setIsDark] = useState(() => {
+    const saved = localStorage.getItem('theme');
+    return saved ? saved === 'dark' : true; // default dark
+  });
   
   const initials = profile?.full_name
     ?.split(' ')
     .map(n => n[0])
     .join('')
     .toUpperCase() || 'U';
+
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+      document.documentElement.classList.remove('light');
+    } else {
+      document.documentElement.classList.add('light');
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+  }, [isDark]);
 
   return (
     <header className={cn(
@@ -45,10 +61,24 @@ export function Header({ onMenuClick }: HeaderProps) {
           </div>
         </div>
 
-        <div className="flex items-center gap-3 md:gap-4">
+        <div className="flex items-center gap-2 md:gap-4">
           <Button variant="ghost" size="icon" className="relative">
             <Bell className="h-5 w-5" />
             <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary animate-pulse" />
+          </Button>
+          
+          {/* Dark/Light mode toggle */}
+          <Button 
+            variant="ghost" 
+            size="icon"
+            onClick={() => setIsDark(!isDark)}
+            className="relative"
+          >
+            {isDark ? (
+              <Sun className="h-5 w-5 text-amber-500" />
+            ) : (
+              <Moon className="h-5 w-5" />
+            )}
           </Button>
           
           <div className="flex items-center gap-2 md:gap-3">
