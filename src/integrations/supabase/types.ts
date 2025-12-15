@@ -502,6 +502,50 @@ export type Database = {
         }
         Relationships: []
       }
+      telegram_usernames: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          id: string
+          last_session_id: string | null
+          sent_at: string | null
+          status: string
+          updated_at: string
+          user_id: string
+          username: string
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          last_session_id?: string | null
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+          username: string
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          last_session_id?: string | null
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+          username?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "telegram_usernames_last_session_id_fkey"
+            columns: ["last_session_id"]
+            isOneToOne: false
+            referencedRelation: "telegram_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           id: string
