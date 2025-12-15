@@ -359,6 +359,11 @@ export default function TelegramManage() {
       toast.error(`Session in cooldown. Wait ${getCooldownRemaining(session)} min.`);
       return;
     }
+    // Don't allow selecting sessions with daily limit reached
+    if (session && getRemainingQuota(session.id) <= 0) {
+      toast.error('Daily limit reached (0/5). Try again in 24 hours.');
+      return;
+    }
     
     const newSelected = new Set(selectedSessions);
     if (checked) {
@@ -369,10 +374,15 @@ export default function TelegramManage() {
     setSelectedSessions(newSelected);
   };
 
+  // Helper to check if session is selectable (not in cooldown and has quota)
+  const isSessionSelectable = (session: TelegramSession) => {
+    return !isSessionInCooldown(session) && getRemainingQuota(session.id) > 0;
+  };
+
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      // Only select sessions that are NOT in cooldown
-      const selectableSessions = filteredSessions.filter(s => !isSessionInCooldown(s));
+      // Only select sessions that are NOT in cooldown and have remaining quota
+      const selectableSessions = filteredSessions.filter(s => isSessionSelectable(s));
       setSelectedSessions(new Set(selectableSessions.map(s => s.id)));
     } else {
       setSelectedSessions(new Set());
@@ -1240,7 +1250,7 @@ export default function TelegramManage() {
                   <TableRow>
                     <TableHead className="w-12">
                       <Checkbox
-                        checked={selectedSessions.size > 0 && selectedSessions.size === filteredSessions.filter(s => !isSessionInCooldown(s)).length}
+                        checked={selectedSessions.size > 0 && selectedSessions.size === filteredSessions.filter(s => isSessionSelectable(s)).length}
                         onCheckedChange={handleSelectAll}
                       />
                     </TableHead>
@@ -1262,7 +1272,7 @@ export default function TelegramManage() {
                         <Checkbox
                           checked={selectedSessions.has(session.id)}
                           onCheckedChange={(checked) => handleSelectSession(session.id, !!checked)}
-                          disabled={isSessionInCooldown(session)}
+                          disabled={!isSessionSelectable(session)}
                         />
                       </TableCell>
                       <TableCell>{index + 1}</TableCell>
