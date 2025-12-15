@@ -18,6 +18,7 @@ import { useTelegramConfig } from '@/hooks/useTelegramConfig';
 import { PhoneVerification } from '@/components/telegram/PhoneVerification';
 import { SessionUpload } from '@/components/telegram/SessionUpload';
 import { ProxyManagement } from '@/components/telegram/ProxyManagement';
+import { UsernameManagement } from '@/components/telegram/UsernameManagement';
 import { 
   Plus, 
   RefreshCw, 
@@ -29,7 +30,8 @@ import {
   MessageSquare,
   AlertCircle,
   Mail,
-  Globe
+  Globe,
+  Users
 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 
@@ -66,6 +68,7 @@ export default function TelegramManage() {
   const [loading, setLoading] = useState(true);
   const [addSessionOpen, setAddSessionOpen] = useState(false);
   const [addProxyOpen, setAddProxyOpen] = useState(false);
+  const [addUsernameOpen, setAddUsernameOpen] = useState(false);
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -642,6 +645,10 @@ export default function TelegramManage() {
               <Globe className="h-4 w-4" />
               Add Proxy
             </Button>
+            <Button onClick={() => setAddUsernameOpen(true)} variant="outline" className="gap-2">
+              <Users className="h-4 w-4" />
+              Add TG Username
+            </Button>
             <Button onClick={() => setAddSessionOpen(true)} className="gap-2">
               <Plus className="h-4 w-4" />
               Add Session
@@ -1170,6 +1177,18 @@ export default function TelegramManage() {
       <ProxyManagement 
         open={addProxyOpen} 
         onOpenChange={setAddProxyOpen} 
+      />
+
+      {/* Username Management Dialog */}
+      <UsernameManagement 
+        open={addUsernameOpen} 
+        onOpenChange={setAddUsernameOpen}
+        sessions={sessions.map(s => ({
+          id: s.id,
+          phone_number: s.phone_number,
+          telegram_name: s.telegram_name,
+          status: s.status
+        }))}
       />
     </DashboardLayout>
   );
