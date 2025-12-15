@@ -4,13 +4,14 @@ import {
   Instagram, 
   MessageSquare, 
   Settings, 
-  Shield
+  Shield,
+  LogOut
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 
 export function MobileBottomNav() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, signOut } = useAuth();
   const location = useLocation();
 
   const navItems = [
@@ -36,7 +37,7 @@ export function MobileBottomNav() {
               key={item.path}
               to={item.path}
               className={cn(
-                'flex flex-col items-center justify-center gap-1 rounded-xl px-3 py-2 min-w-[60px] transition-all duration-200',
+                'flex flex-col items-center justify-center gap-1 rounded-xl px-3 py-2 min-w-[56px] transition-all duration-200',
                 isActive
                   ? 'text-primary'
                   : 'text-muted-foreground'
@@ -55,6 +56,17 @@ export function MobileBottomNav() {
             </NavLink>
           );
         })}
+        
+        {/* Logout button */}
+        <button
+          onClick={() => signOut()}
+          className="flex flex-col items-center justify-center gap-1 rounded-xl px-3 py-2 min-w-[56px] transition-all duration-200 text-destructive"
+        >
+          <div className="p-1.5 rounded-xl transition-all duration-200">
+            <LogOut className="h-5 w-5" />
+          </div>
+          <span className="text-[10px] font-medium">Logout</span>
+        </button>
       </div>
     </nav>
   );
