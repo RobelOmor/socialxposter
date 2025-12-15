@@ -151,7 +151,7 @@ export default function TelegramReplies() {
 
   const callVpsProxy = async (endpoint: string, body: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke('telegram-vps-proxy', {
-      body: { endpoint, ...body },
+      body: { endpoint, method: 'POST', body },
     });
     if (error) throw error;
     return data;
@@ -182,34 +182,49 @@ export default function TelegramReplies() {
 
           if (data?.success && data?.messages && Array.isArray(data.messages)) {
             for (const msg of data.messages) {
-              // Insert into telegram_replies with user_id for isolation
-              const { error: insertError } = await supabase
+              // Check if this message already exists (prevent duplicates based on from_user_id, session_id, message content)
+              const fromUserId = msg.from_user_id?.toString() || msg.chat_id?.toString() || null;
+              const msgContent = msg.text || '';
+              const msgDate = msg.date ? new Date(msg.date).toISOString() : new Date().toISOString();
+              
+              const { data: existing } = await supabase
                 .from('telegram_replies')
-                .upsert({
-                  user_id: user.id,
-                  session_id: session.id,
-                  from_user: msg.from_user_name || msg.from_user_id?.toString() || 'Unknown',
-                  from_user_id: msg.from_user_id?.toString() || null,
-                  message_content: msg.text || '',
-                  replied: false,
-                  created_at: msg.date ? new Date(msg.date).toISOString() : new Date().toISOString(),
-                }, {
-                  onConflict: 'id',
-                  ignoreDuplicates: false,
-                });
+                .select('id')
+                .eq('user_id', user.id)
+                .eq('session_id', session.id)
+                .eq('from_user_id', fromUserId)
+                .eq('message_content', msgContent)
+                .maybeSingle();
 
-              if (!insertError) {
-                totalSynced++;
+              if (!existing) {
+                // Insert new reply with user_id for data isolation
+                const { error: insertError } = await supabase
+                  .from('telegram_replies')
+                  .insert({
+                    user_id: user.id,
+                    session_id: session.id,
+                    from_user: msg.from_user_name || fromUserId || 'Unknown',
+                    from_user_id: fromUserId,
+                    message_content: msgContent,
+                    replied: false,
+                    created_at: msgDate,
+                  });
+
+                if (!insertError) {
+                  totalSynced++;
+                }
               }
             }
 
             // Update session replies_received count
-            await supabase
-              .from('telegram_sessions')
-              .update({ 
-                replies_received: (session.replies_received || 0) + (data.messages?.length || 0)
-              })
-              .eq('id', session.id);
+            if (data.messages.length > 0) {
+              await supabase
+                .from('telegram_sessions')
+                .update({ 
+                  replies_received: (session.replies_received || 0) + totalSynced
+                })
+                .eq('id', session.id);
+            }
           }
         } catch (err) {
           console.error(`Failed to sync session ${session.phone_number}:`, err);
@@ -258,9 +273,10 @@ export default function TelegramReplies() {
 
     setSendingReply(true);
     try {
-      const data = await callVpsProxy('/send-message', {
+      const chatId = selectedReplyGroup.from_user_id || selectedReplyGroup.from_user;
+      const data = await callVpsProxy('/reply-message', {
         session_data: session.session_data,
-        destination: selectedReplyGroup.from_user_id || selectedReplyGroup.from_user,
+        chat_id: chatId,
         message: conversationReplyContent,
         proxy_host: session.proxy_host,
         proxy_port: session.proxy_port,
@@ -270,7 +286,19 @@ export default function TelegramReplies() {
 
       if (data?.status === 'ok' || data?.success) {
         toast.success('Reply sent successfully');
-        setConversationReplyContent('');
+        
+        // Update the last reply in database as replied
+        const lastUnrepliedMessage = selectedReplyGroup.replies.find(r => !r.replied);
+        if (lastUnrepliedMessage) {
+          await supabase
+            .from('telegram_replies')
+            .update({ 
+              replied: true,
+              reply_content: conversationReplyContent,
+              replied_at: new Date().toISOString()
+            })
+            .eq('id', lastUnrepliedMessage.id);
+        }
         
         // Update session messages_sent
         await supabase
@@ -281,7 +309,9 @@ export default function TelegramReplies() {
           })
           .eq('id', session.id);
         
+        setConversationReplyContent('');
         fetchReplyGroups();
+        fetchSessions();
       } else {
         toast.error(data?.error || 'Failed to send reply');
       }
