@@ -47,6 +47,9 @@ import { Progress } from '@/components/ui/progress';
 // Daily message limit per session (to prevent bans)
 const DAILY_MESSAGE_LIMIT = 5;
 
+// Cooldown period in minutes after sending a message
+const COOLDOWN_MINUTES = 10;
+
 interface TelegramSession {
   id: string;
   phone_number: string;
@@ -162,6 +165,10 @@ export default function TelegramManage() {
 
   // Daily message counts per session (to track limits)
   const [dailyMessageCounts, setDailyMessageCounts] = useState<Record<string, number>>({});
+  
+  // Cooldown refresh trigger
+  const [cooldownTick, setCooldownTick] = useState(0);
+  
   useEffect(() => {
     if (user) {
       fetchSessions();
@@ -169,6 +176,14 @@ export default function TelegramManage() {
       fetchDailyMessageCounts();
     }
   }, [user]);
+  
+  // Refresh cooldown display every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCooldownTick(t => t + 1);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const fetchSessions = async () => {
     if (!user) return;
@@ -318,8 +333,33 @@ export default function TelegramManage() {
     return Math.max(0, DAILY_MESSAGE_LIMIT - used);
   };
 
+  // Check if session is in cooldown (used within last 10 minutes)
+  const isSessionInCooldown = (session: TelegramSession) => {
+    if (!session.last_used_at) return false;
+    const lastUsed = new Date(session.last_used_at).getTime();
+    const cooldownMs = COOLDOWN_MINUTES * 60 * 1000;
+    return Date.now() - lastUsed < cooldownMs;
+  };
+
+  // Get remaining cooldown time in minutes
+  const getCooldownRemaining = (session: TelegramSession) => {
+    if (!session.last_used_at) return 0;
+    const lastUsed = new Date(session.last_used_at).getTime();
+    const cooldownMs = COOLDOWN_MINUTES * 60 * 1000;
+    const remaining = cooldownMs - (Date.now() - lastUsed);
+    if (remaining <= 0) return 0;
+    return Math.ceil(remaining / 60000); // Return minutes
+  };
+
 
   const handleSelectSession = (sessionId: string, checked: boolean) => {
+    const session = sessions.find(s => s.id === sessionId);
+    // Don't allow selecting sessions in cooldown
+    if (session && isSessionInCooldown(session)) {
+      toast.error(`Session in cooldown. Wait ${getCooldownRemaining(session)} min.`);
+      return;
+    }
+    
     const newSelected = new Set(selectedSessions);
     if (checked) {
       newSelected.add(sessionId);
@@ -331,8 +371,9 @@ export default function TelegramManage() {
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      const filteredSessionIds = filteredSessions.map(s => s.id);
-      setSelectedSessions(new Set(filteredSessionIds));
+      // Only select sessions that are NOT in cooldown
+      const selectableSessions = filteredSessions.filter(s => !isSessionInCooldown(s));
+      setSelectedSessions(new Set(selectableSessions.map(s => s.id)));
     } else {
       setSelectedSessions(new Set());
     }
@@ -800,13 +841,13 @@ export default function TelegramManage() {
     // Refresh daily counts first
     await fetchDailyMessageCounts();
 
-    // Get selected active sessions with remaining quota
+    // Get selected active sessions with remaining quota AND not in cooldown
     const selectedSessionsArray = sessions.filter(s => 
-      selectedSessions.has(s.id) && s.status === 'active' && getRemainingQuota(s.id) > 0
+      selectedSessions.has(s.id) && s.status === 'active' && getRemainingQuota(s.id) > 0 && !isSessionInCooldown(s)
     );
 
     if (selectedSessionsArray.length === 0) {
-      toast.error('No active sessions with remaining daily quota. Each session can send max 5 messages/day.');
+      toast.error('No active sessions available. Sessions may be in cooldown (10 min) or daily limit reached.');
       setBulkSenderSending(false);
       return;
     }
@@ -1176,6 +1217,8 @@ export default function TelegramManage() {
                     unreadCount={unreadCounts[session.id]}
                     dailyQuotaRemaining={getRemainingQuota(session.id)}
                     dailyLimit={DAILY_MESSAGE_LIMIT}
+                    isInCooldown={isSessionInCooldown(session)}
+                    cooldownRemaining={getCooldownRemaining(session)}
                     onSelect={(checked) => handleSelectSession(session.id, !!checked)}
                     onValidate={() => handleValidateSession(session)}
                     onSendMessage={() => {
@@ -1197,7 +1240,7 @@ export default function TelegramManage() {
                   <TableRow>
                     <TableHead className="w-12">
                       <Checkbox
-                        checked={selectedSessions.size === filteredSessions.length && filteredSessions.length > 0}
+                        checked={selectedSessions.size > 0 && selectedSessions.size === filteredSessions.filter(s => !isSessionInCooldown(s)).length}
                         onCheckedChange={handleSelectAll}
                       />
                     </TableHead>
@@ -1219,6 +1262,7 @@ export default function TelegramManage() {
                         <Checkbox
                           checked={selectedSessions.has(session.id)}
                           onCheckedChange={(checked) => handleSelectSession(session.id, !!checked)}
+                          disabled={isSessionInCooldown(session)}
                         />
                       </TableCell>
                       <TableCell>{index + 1}</TableCell>
@@ -1239,9 +1283,15 @@ export default function TelegramManage() {
                       <TableCell>
                         <div className="flex flex-col">
                           <span>{session.messages_sent || 0}</span>
-                          <span className={`text-xs ${getRemainingQuota(session.id) > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            {getRemainingQuota(session.id)}/{DAILY_MESSAGE_LIMIT} today
-                          </span>
+                          {isSessionInCooldown(session) ? (
+                            <span className="text-xs text-yellow-400">
+                              ⏳ {getCooldownRemaining(session)}m cooldown
+                            </span>
+                          ) : (
+                            <span className={`text-xs ${getRemainingQuota(session.id) > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {getRemainingQuota(session.id)}/{DAILY_MESSAGE_LIMIT} today
+                            </span>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell>

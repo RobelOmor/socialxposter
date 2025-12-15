@@ -1,7 +1,7 @@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { RefreshCw, Send, Pencil, Trash2, Mail, Globe } from 'lucide-react';
+import { RefreshCw, Send, Pencil, Trash2, Mail, Globe, Clock } from 'lucide-react';
 
 interface TelegramSession {
   id: string;
@@ -22,6 +22,8 @@ interface MobileSessionCardProps {
   unreadCount?: number;
   dailyQuotaRemaining?: number;
   dailyLimit?: number;
+  isInCooldown?: boolean;
+  cooldownRemaining?: number;
   onSelect: (checked: boolean) => void;
   onValidate: () => void;
   onSendMessage: () => void;
@@ -37,6 +39,8 @@ export function MobileSessionCard({
   unreadCount,
   dailyQuotaRemaining = 5,
   dailyLimit = 5,
+  isInCooldown = false,
+  cooldownRemaining = 0,
   onSelect,
   onValidate,
   onSendMessage,
@@ -58,18 +62,25 @@ export function MobileSessionCard({
   };
 
   return (
-    <div className="mobile-card space-y-3">
+    <div className={`mobile-card space-y-3 ${isInCooldown ? 'opacity-60' : ''}`}>
       <div className="flex items-start gap-3">
         <Checkbox
           checked={selected}
           onCheckedChange={onSelect}
           className="mt-1"
+          disabled={isInCooldown}
         />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-muted-foreground">#{index}</span>
             <span className="font-semibold text-foreground truncate">{session.phone_number}</span>
             {getStatusBadge(session.status)}
+            {isInCooldown && (
+              <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 text-xs gap-1">
+                <Clock className="h-3 w-3" />
+                {cooldownRemaining}m
+              </Badge>
+            )}
           </div>
           {session.telegram_name && (
             <p className="text-sm text-muted-foreground truncate mt-0.5">{session.telegram_name}</p>
@@ -83,10 +94,19 @@ export function MobileSessionCard({
           <p className="text-muted-foreground">Sent</p>
         </div>
         <div className="bg-secondary/50 rounded-lg py-2">
-          <p className={`font-semibold ${dailyQuotaRemaining > 0 ? 'text-green-400' : 'text-red-400'}`}>
-            {dailyQuotaRemaining}/{dailyLimit}
-          </p>
-          <p className="text-muted-foreground">Today</p>
+          {isInCooldown ? (
+            <>
+              <p className="font-semibold text-yellow-400">⏳ {cooldownRemaining}m</p>
+              <p className="text-muted-foreground">Cooldown</p>
+            </>
+          ) : (
+            <>
+              <p className={`font-semibold ${dailyQuotaRemaining > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {dailyQuotaRemaining}/{dailyLimit}
+              </p>
+              <p className="text-muted-foreground">Today</p>
+            </>
+          )}
         </div>
         <div className="bg-secondary/50 rounded-lg py-2">
           <button
@@ -129,7 +149,7 @@ export function MobileSessionCard({
           size="sm"
           variant="outline"
           onClick={onSendMessage}
-          disabled={session.status !== 'active'}
+          disabled={session.status !== 'active' || isInCooldown}
           className="flex-1 h-9 text-xs gap-1"
         >
           <Send className="h-3.5 w-3.5" />
