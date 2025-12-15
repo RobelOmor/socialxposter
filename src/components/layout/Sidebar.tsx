@@ -177,7 +177,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         </nav>
 
         {/* User Info & Logout */}
-        <div className="border-t border-border/50 p-4">
+        <div className="border-t border-border/50 p-4 pb-20 lg:pb-4">
           <div className="mb-3 rounded-xl bg-gradient-to-br from-secondary/80 to-secondary/40 p-3 backdrop-blur">
             <p className="text-sm font-medium text-foreground">{profile?.full_name}</p>
             <p className="text-xs text-muted-foreground">{profile?.email}</p>
