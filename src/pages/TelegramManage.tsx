@@ -19,6 +19,8 @@ import { PhoneVerification } from '@/components/telegram/PhoneVerification';
 import { SessionUpload } from '@/components/telegram/SessionUpload';
 import { ProxyManagement } from '@/components/telegram/ProxyManagement';
 import { UsernameManagement } from '@/components/telegram/UsernameManagement';
+import { MobileSessionCard } from '@/components/telegram/MobileSessionCard';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { 
   Plus, 
   RefreshCw, 
@@ -64,6 +66,7 @@ interface UnreadMessage {
 export default function TelegramManage() {
   const { user } = useAuth();
   const { config, loading: configLoading } = useTelegramConfig();
+  const isMobile = useIsMobile();
   const [sessions, setSessions] = useState<TelegramSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [addSessionOpen, setAddSessionOpen] = useState(false);
@@ -784,132 +787,160 @@ export default function TelegramManage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex flex-col gap-3 sm:gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Telegram Manage</h1>
-            <p className="text-muted-foreground">Manage sessions, send messages, track replies</p>
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground">Telegram Manage</h1>
+            <p className="text-sm text-muted-foreground">Manage sessions, send messages, track replies</p>
           </div>
-          <div className="flex gap-2">
-            <Button onClick={() => setAddProxyOpen(true)} variant="outline" className="gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => setAddProxyOpen(true)} variant="outline" size="sm" className="gap-1.5 flex-1 sm:flex-none">
               <Globe className="h-4 w-4" />
-              Add Proxy
+              <span className="hidden sm:inline">Add</span> Proxy
             </Button>
-            <Button onClick={() => setAddUsernameOpen(true)} variant="outline" className="gap-2">
+            <Button onClick={() => setAddUsernameOpen(true)} variant="outline" size="sm" className="gap-1.5 flex-1 sm:flex-none">
               <Users className="h-4 w-4" />
-              Add TG Username
+              <span className="hidden sm:inline">Add TG</span> Username
             </Button>
-            <Button onClick={() => setAddSessionOpen(true)} className="gap-2">
+            <Button onClick={() => setAddSessionOpen(true)} size="sm" className="gap-1.5 flex-1 sm:flex-none">
               <Plus className="h-4 w-4" />
-              Add Session
+              <span className="hidden sm:inline">Add</span> Session
             </Button>
           </div>
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-2xl font-bold">{sessions.length}</div>
-              <div className="text-xs text-muted-foreground">Total Sessions</div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
+          <Card className="glass-card">
+            <CardContent className="p-3 sm:pt-6 sm:p-6">
+              <div className="text-xl sm:text-2xl font-bold">{sessions.length}</div>
+              <div className="text-[10px] sm:text-xs text-muted-foreground">Total Sessions</div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-2xl font-bold text-green-500">
+          <Card className="glass-card">
+            <CardContent className="p-3 sm:pt-6 sm:p-6">
+              <div className="text-xl sm:text-2xl font-bold text-green-500">
                 {sessions.filter(s => s.status === 'active').length}
               </div>
-              <div className="text-xs text-muted-foreground">Active</div>
+              <div className="text-[10px] sm:text-xs text-muted-foreground">Active</div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-2xl font-bold text-blue-500">
+          <Card className="glass-card">
+            <CardContent className="p-3 sm:pt-6 sm:p-6">
+              <div className="text-xl sm:text-2xl font-bold text-blue-500">
                 {sessions.reduce((sum, s) => sum + (s.messages_sent || 0), 0)}
               </div>
-              <div className="text-xs text-muted-foreground">Messages Sent</div>
+              <div className="text-[10px] sm:text-xs text-muted-foreground">Messages Sent</div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-2xl font-bold text-purple-500">
+          <Card className="glass-card">
+            <CardContent className="p-3 sm:pt-6 sm:p-6">
+              <div className="text-xl sm:text-2xl font-bold text-purple-500">
                 {sessions.reduce((sum, s) => sum + (s.replies_received || 0), 0)}
               </div>
-              <div className="text-xs text-muted-foreground">Replies</div>
+              <div className="text-[10px] sm:text-xs text-muted-foreground">Replies</div>
             </CardContent>
           </Card>
         </div>
 
         {/* Action Bar */}
-        <div className="flex flex-wrap gap-2 items-center">
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
           <Input
-            placeholder="Search by phone number..."
+            placeholder="Search phone..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="max-w-xs"
+            className="w-full sm:max-w-xs"
           />
           
           {selectedSessions.size > 0 && (
-            <>
-              <Button onClick={() => setBulkMessageOpen(true)} variant="outline" className="gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => setBulkMessageOpen(true)} variant="outline" size="sm" className="gap-1.5 flex-1 sm:flex-none">
                 <Send className="h-4 w-4" />
-                Send Message ({selectedSessions.size})
+                <span className="hidden sm:inline">Send</span> ({selectedSessions.size})
               </Button>
-              <Button onClick={handleExportCSV} variant="outline" className="gap-2">
+              <Button onClick={handleExportCSV} variant="outline" size="sm" className="gap-1.5">
                 <Download className="h-4 w-4" />
-                Export
               </Button>
-              <Button onClick={() => setBulkSenderOpen(true)} className="gap-2 bg-purple-600 hover:bg-purple-700">
+              <Button onClick={() => setBulkSenderOpen(true)} size="sm" className="gap-1.5 bg-purple-600 hover:bg-purple-700 flex-1 sm:flex-none">
                 <Users className="h-4 w-4" />
                 Bulk Sender
               </Button>
-              <Button onClick={() => setDeleteConfirmOpen(true)} variant="destructive" className="gap-2">
+              <Button onClick={() => setDeleteConfirmOpen(true)} variant="destructive" size="sm" className="gap-1.5">
                 <Trash2 className="h-4 w-4" />
-                Delete ({selectedSessions.size})
+                <span className="hidden sm:inline">({selectedSessions.size})</span>
               </Button>
-            </>
+            </div>
           )}
         </div>
 
-        {/* Sessions Table */}
-        <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12">
-                    <Checkbox
-                      checked={selectedSessions.size === filteredSessions.length && filteredSessions.length > 0}
-                      onCheckedChange={handleSelectAll}
-                    />
-                  </TableHead>
-                  <TableHead>#</TableHead>
-                  <TableHead>Phone Number</TableHead>
-                  <TableHead>Telegram Name</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Proxy</TableHead>
-                  <TableHead>Messages</TableHead>
-                  <TableHead>Replies</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
+        {/* Sessions - Mobile Cards / Desktop Table */}
+        <Card className="glass-card">
+          <CardContent className="p-2 sm:p-0">
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : filteredSessions.length === 0 ? (
+              <div className="text-center py-8 sm:py-12">
+                <MessageSquare className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-muted-foreground mb-3" />
+                <p className="text-sm text-muted-foreground">No sessions found. Add your first session to get started.</p>
+              </div>
+            ) : isMobile ? (
+              // Mobile: Card View
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 p-2 bg-secondary/30 rounded-lg">
+                  <Checkbox
+                    checked={selectedSessions.size === filteredSessions.length && filteredSessions.length > 0}
+                    onCheckedChange={handleSelectAll}
+                  />
+                  <span className="text-xs text-muted-foreground">Select All ({filteredSessions.length})</span>
+                </div>
+                {filteredSessions.map((session, index) => (
+                  <MobileSessionCard
+                    key={session.id}
+                    session={session}
+                    index={index + 1}
+                    selected={selectedSessions.has(session.id)}
+                    unreadCount={unreadCounts[session.id]}
+                    onSelect={(checked) => handleSelectSession(session.id, !!checked)}
+                    onValidate={() => handleValidateSession(session)}
+                    onSendMessage={() => {
+                      setSingleSession(session);
+                      setSingleUsername('');
+                      setSingleContent('');
+                      setSingleMessageOpen(true);
+                    }}
+                    onEditProxy={() => openEditProxy(session)}
+                    onDelete={() => handleDeleteSession(session)}
+                    onOpenUnread={() => openUnreadDialog(session)}
+                  />
+                ))}
+              </div>
+            ) : (
+              // Desktop: Table View
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8">
-                      <Loader2 className="h-6 w-6 animate-spin mx-auto" />
-                    </TableCell>
+                    <TableHead className="w-12">
+                      <Checkbox
+                        checked={selectedSessions.size === filteredSessions.length && filteredSessions.length > 0}
+                        onCheckedChange={handleSelectAll}
+                      />
+                    </TableHead>
+                    <TableHead>#</TableHead>
+                    <TableHead>Phone Number</TableHead>
+                    <TableHead>Telegram Name</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Proxy</TableHead>
+                    <TableHead>Messages</TableHead>
+                    <TableHead>Replies</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
-                ) : filteredSessions.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
-                      No sessions found. Add your first session to get started.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredSessions.map((session, index) => (
+                </TableHeader>
+                <TableBody>
+                  {filteredSessions.map((session, index) => (
                     <TableRow key={session.id}>
                       <TableCell>
                         <Checkbox
@@ -993,10 +1024,10 @@ export default function TelegramManage() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
       </div>

@@ -88,4 +88,25 @@
     from { box-shadow: 0 0 20px hsl(262 83% 58% / 0.3); }
     to { box-shadow: 0 0 30px hsl(262 83% 58% / 0.5); }
   }
+  
+  /* Safe area for mobile devices */
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+  
+  /* Mobile-friendly scrolling */
+  .mobile-scroll {
+    -webkit-overflow-scrolling: touch;
+    overflow-x: auto;
+  }
+  
+  /* Touch-friendly targets */
+  .touch-target {
+    @apply min-h-[44px] min-w-[44px];
+  }
+  
+  /* Mobile card styles */
+  .mobile-card {
+    @apply rounded-xl p-3 sm:p-4 bg-card/80 border border-border/50;
+  }
 }
