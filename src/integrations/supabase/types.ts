@@ -445,9 +445,34 @@ export type Database = {
           },
         ]
       }
+      telegram_session_filters: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       telegram_sessions: {
         Row: {
           created_at: string
+          filter_id: string | null
           id: string
           last_used_at: string | null
           messages_sent: number | null
@@ -466,6 +491,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          filter_id?: string | null
           id?: string
           last_used_at?: string | null
           messages_sent?: number | null
@@ -484,6 +510,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          filter_id?: string | null
           id?: string
           last_used_at?: string | null
           messages_sent?: number | null
@@ -500,7 +527,15 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "telegram_sessions_filter_id_fkey"
+            columns: ["filter_id"]
+            isOneToOne: false
+            referencedRelation: "telegram_session_filters"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       telegram_usernames: {
         Row: {

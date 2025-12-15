@@ -36,8 +36,12 @@ import {
   Globe,
   Users,
   MessageCircle,
-  Eye
+  Eye,
+  Filter,
+  FolderPlus,
+  Tag
 } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
 
 // Daily message limit per session (to prevent bans)
@@ -58,6 +62,14 @@ interface TelegramSession {
   replies_received: number | null;
   created_at: string;
   last_used_at: string | null;
+  filter_id: string | null;
+}
+
+interface SessionFilter {
+  id: string;
+  name: string;
+  user_id: string;
+  created_at: string;
 }
 
 interface UnreadMessage {
@@ -82,6 +94,15 @@ export default function TelegramManage() {
   const [addUsernameOpen, setAddUsernameOpen] = useState(false);
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Filter system state
+  const [filters, setFilters] = useState<SessionFilter[]>([]);
+  const [activeFilterId, setActiveFilterId] = useState<string | null>(null);
+  const [createFilterOpen, setCreateFilterOpen] = useState(false);
+  const [newFilterName, setNewFilterName] = useState('');
+  const [creatingFilter, setCreatingFilter] = useState(false);
+  const [moveToFilterOpen, setMoveToFilterOpen] = useState(false);
+  const [selectedMoveFilterId, setSelectedMoveFilterId] = useState<string>('');
 
   // Bulk message state
   const [bulkMessageOpen, setBulkMessageOpen] = useState(false);
@@ -144,6 +165,7 @@ export default function TelegramManage() {
   useEffect(() => {
     if (user) {
       fetchSessions();
+      fetchFilters();
       fetchDailyMessageCounts();
     }
   }, [user]);
@@ -165,7 +187,107 @@ export default function TelegramManage() {
     setLoading(false);
   };
 
-  // Fetch today's message count for all sessions
+  // Fetch filters
+  const fetchFilters = async () => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from('telegram_session_filters')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: true });
+    
+    if (!error && data) {
+      setFilters(data as SessionFilter[]);
+    }
+  };
+
+  // Create new filter and assign selected sessions
+  const handleCreateFilter = async () => {
+    if (!user || !newFilterName.trim()) {
+      toast.error('Enter filter name');
+      return;
+    }
+    
+    setCreatingFilter(true);
+    try {
+      // Create the filter
+      const { data: newFilter, error: createError } = await supabase
+        .from('telegram_session_filters')
+        .insert({ user_id: user.id, name: newFilterName.trim() })
+        .select()
+        .single();
+      
+      if (createError) throw createError;
+      
+      // Move selected sessions to this filter
+      if (selectedSessions.size > 0) {
+        const { error: updateError } = await supabase
+          .from('telegram_sessions')
+          .update({ filter_id: newFilter.id })
+          .in('id', Array.from(selectedSessions));
+        
+        if (updateError) throw updateError;
+      }
+      
+      toast.success(`Filter "${newFilterName}" created with ${selectedSessions.size} session(s)`);
+      setNewFilterName('');
+      setCreateFilterOpen(false);
+      setSelectedSessions(new Set());
+      fetchSessions();
+      fetchFilters();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to create filter');
+    }
+    setCreatingFilter(false);
+  };
+
+  // Move selected sessions to an existing filter
+  const handleMoveToFilter = async () => {
+    if (!selectedMoveFilterId || selectedSessions.size === 0) return;
+    
+    try {
+      const { error } = await supabase
+        .from('telegram_sessions')
+        .update({ filter_id: selectedMoveFilterId === 'none' ? null : selectedMoveFilterId })
+        .in('id', Array.from(selectedSessions));
+      
+      if (error) throw error;
+      
+      const filterName = selectedMoveFilterId === 'none' 
+        ? 'Unfiltered' 
+        : filters.find(f => f.id === selectedMoveFilterId)?.name;
+      toast.success(`${selectedSessions.size} session(s) moved to "${filterName}"`);
+      setMoveToFilterOpen(false);
+      setSelectedMoveFilterId('');
+      setSelectedSessions(new Set());
+      fetchSessions();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to move sessions');
+    }
+  };
+
+  // Delete a filter (sessions go back to unfiltered)
+  const handleDeleteFilter = async (filterId: string) => {
+    if (!confirm('Delete this filter? Sessions will become unfiltered.')) return;
+    
+    try {
+      const { error } = await supabase
+        .from('telegram_session_filters')
+        .delete()
+        .eq('id', filterId);
+      
+      if (error) throw error;
+      
+      if (activeFilterId === filterId) {
+        setActiveFilterId(null);
+      }
+      toast.success('Filter deleted');
+      fetchFilters();
+      fetchSessions();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete filter');
+    }
+  };
   const fetchDailyMessageCounts = async () => {
     if (!user) return;
     
@@ -825,12 +947,29 @@ export default function TelegramManage() {
     toast.success(`Bulk send complete: ${successCount} success, ${failCount} failed${skippedCount > 0 ? `, ${skippedCount} skipped (limit)` : ''}`);
   };
 
-  // Filter sessions
+  // Filter sessions by active filter and search query
   const filteredSessions = sessions.filter(session => {
+    // First apply filter_id filter
+    if (activeFilterId === 'unfiltered') {
+      if (session.filter_id !== null) return false;
+    } else if (activeFilterId) {
+      if (session.filter_id !== activeFilterId) return false;
+    }
+    
+    // Then apply search
     if (!searchQuery) return true;
     return session.phone_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
-           session.session_name?.toLowerCase().includes(searchQuery.toLowerCase());
+           session.session_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+           session.telegram_name?.toLowerCase().includes(searchQuery.toLowerCase());
   });
+  
+  // Get count for each filter
+  const getFilterCount = (filterId: string | null) => {
+    if (filterId === 'unfiltered') {
+      return sessions.filter(s => s.filter_id === null).length;
+    }
+    return sessions.filter(s => s.filter_id === filterId).length;
+  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -927,10 +1066,49 @@ export default function TelegramManage() {
           </Card>
         </div>
 
+        {/* Filter Buttons */}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant={activeFilterId === null ? "default" : "outline"}
+            size="sm"
+            onClick={() => setActiveFilterId(null)}
+            className="gap-1.5"
+          >
+            <Filter className="h-4 w-4" />
+            All ({sessions.length})
+          </Button>
+          <Button
+            variant={activeFilterId === 'unfiltered' ? "default" : "outline"}
+            size="sm"
+            onClick={() => setActiveFilterId('unfiltered')}
+            className="gap-1.5"
+          >
+            Unfiltered ({getFilterCount('unfiltered')})
+          </Button>
+          {filters.map(filter => (
+            <Button
+              key={filter.id}
+              variant={activeFilterId === filter.id ? "default" : "outline"}
+              size="sm"
+              onClick={() => setActiveFilterId(filter.id)}
+              className="gap-1.5 group"
+            >
+              <Tag className="h-3 w-3" />
+              {filter.name} ({getFilterCount(filter.id)})
+              <span 
+                className="ml-1 text-destructive opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                onClick={(e) => { e.stopPropagation(); handleDeleteFilter(filter.id); }}
+              >
+                ×
+              </span>
+            </Button>
+          ))}
+        </div>
+
         {/* Action Bar */}
         <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
           <Input
-            placeholder="Search phone..."
+            placeholder="Search phone/name..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full sm:max-w-xs"
@@ -949,6 +1127,16 @@ export default function TelegramManage() {
                 <Users className="h-4 w-4" />
                 Bulk Sender
               </Button>
+              <Button onClick={() => setCreateFilterOpen(true)} size="sm" variant="outline" className="gap-1.5 border-blue-500/30 text-blue-400 hover:bg-blue-500/10">
+                <FolderPlus className="h-4 w-4" />
+                Create Filter
+              </Button>
+              {filters.length > 0 && (
+                <Button onClick={() => setMoveToFilterOpen(true)} size="sm" variant="outline" className="gap-1.5 border-green-500/30 text-green-400 hover:bg-green-500/10">
+                  <Tag className="h-4 w-4" />
+                  Move to Filter
+                </Button>
+              )}
               <Button onClick={() => setDeleteConfirmOpen(true)} variant="destructive" size="sm" className="gap-1.5">
                 <Trash2 className="h-4 w-4" />
                 <span className="hidden sm:inline">({selectedSessions.size})</span>
@@ -1606,6 +1794,87 @@ export default function TelegramManage() {
           status: s.status
         }))}
       />
+
+      {/* Create Filter Dialog */}
+      <Dialog open={createFilterOpen} onOpenChange={setCreateFilterOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FolderPlus className="h-5 w-5" />
+              Create Filter
+            </DialogTitle>
+            <DialogDescription>
+              Create a new filter and add {selectedSessions.size} selected session(s) to it
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <div>
+              <Label>Filter Name</Label>
+              <Input
+                placeholder="e.g., VIP Sessions, Test Group"
+                value={newFilterName}
+                onChange={(e) => setNewFilterName(e.target.value)}
+                disabled={creatingFilter}
+              />
+            </div>
+            
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setCreateFilterOpen(false)} disabled={creatingFilter}>
+                Cancel
+              </Button>
+              <Button onClick={handleCreateFilter} disabled={creatingFilter || !newFilterName.trim()} className="gap-2">
+                {creatingFilter ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
+                Create
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Move to Filter Dialog */}
+      <Dialog open={moveToFilterOpen} onOpenChange={setMoveToFilterOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Tag className="h-5 w-5" />
+              Move to Filter
+            </DialogTitle>
+            <DialogDescription>
+              Move {selectedSessions.size} selected session(s) to an existing filter
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <div>
+              <Label>Select Filter</Label>
+              <Select value={selectedMoveFilterId} onValueChange={setSelectedMoveFilterId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose a filter..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Unfiltered (Remove from filter)</SelectItem>
+                  {filters.map(filter => (
+                    <SelectItem key={filter.id} value={filter.id}>
+                      {filter.name} ({getFilterCount(filter.id)})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setMoveToFilterOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleMoveToFilter} disabled={!selectedMoveFilterId} className="gap-2">
+                <Tag className="h-4 w-4" />
+                Move
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }
