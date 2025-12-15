@@ -61,14 +61,17 @@ export function MobileSessionCard({
     }
   };
 
+  // Session is disabled if in cooldown OR daily limit reached
+  const isDisabled = isInCooldown || dailyQuotaRemaining <= 0;
+
   return (
-    <div className={`mobile-card space-y-3 ${isInCooldown ? 'opacity-60' : ''}`}>
+    <div className={`mobile-card space-y-3 ${isDisabled ? 'opacity-60' : ''}`}>
       <div className="flex items-start gap-3">
         <Checkbox
           checked={selected}
           onCheckedChange={onSelect}
           className="mt-1"
-          disabled={isInCooldown}
+          disabled={isDisabled}
         />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
