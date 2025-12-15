@@ -52,91 +52,59 @@ serve(async (req) => {
 
     console.log(`Performing ${action} on account:`, account.username);
 
-    // Parse cookies - supports string, JSON object, and JSON array formats
-    let cookieObj: Record<string, string> = {};
-    let cookieString = account.cookies;
-    
-    const trimmedCookies = account.cookies.trim();
-    
-    if (trimmedCookies.startsWith('[') && trimmedCookies.endsWith(']')) {
-      try {
-        const jsonArray = JSON.parse(trimmedCookies);
-        jsonArray.forEach((cookie: { name: string; value: string }) => {
-          if (cookie.name && cookie.value) {
-            cookieObj[cookie.name] = cookie.value;
-          }
-        });
-        cookieString = Object.entries(cookieObj)
-          .map(([key, value]) => `${key}=${value}`)
-          .join('; ');
-      } catch (e) {
-        console.error('Failed to parse JSON array cookies:', e);
-      }
-    } else if (trimmedCookies.startsWith('{') && trimmedCookies.endsWith('}')) {
-      try {
-        cookieObj = JSON.parse(trimmedCookies);
-        cookieString = Object.entries(cookieObj)
-          .map(([key, value]) => `${key}=${value}`)
-          .join('; ');
-      } catch (e) {
-        console.error('Failed to parse JSON cookies:', e);
-      }
-    } else {
-      account.cookies.split(';').forEach((cookie: string) => {
-        const [key, value] = cookie.trim().split('=');
-        if (key && value) {
-          cookieObj[key.trim()] = value.trim();
-        }
-      });
+    // Get VPS IP from admin config
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
+
+    const { data: config, error: configError } = await supabaseAdmin
+      .from('telegram_admin_config')
+      .select('vps_ip')
+      .single();
+
+    if (configError || !config?.vps_ip) {
+      console.error('VPS IP not configured:', configError);
+      return new Response(
+        JSON.stringify({ success: false, error: 'VPS IP not configured in admin panel' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
-    const dsUserId = cookieObj['ds_user_id'];
-    const csrfToken = cookieObj['csrftoken'];
-
-    // Test/refresh session by fetching user info
-    console.log('=== Instagram Session Check START ===');
-    console.log('Account username:', account.username);
-    console.log('ds_user_id:', dsUserId);
-    console.log('csrftoken:', csrfToken ? 'present' : 'missing');
+    let vpsBaseUrl = config.vps_ip;
     
-    const userInfoResponse = await fetch(
-      `https://i.instagram.com/api/v1/users/${dsUserId}/info/`,
-      {
-        headers: {
-          'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229258)',
-          'X-CSRFToken': csrfToken,
-          'X-IG-App-ID': '936619743392459',
-          'Cookie': cookieString,
-        },
+    // Handle different URL formats
+    if (vpsBaseUrl.includes('.ngrok') || vpsBaseUrl.includes('ngrok-free.app')) {
+      if (!vpsBaseUrl.startsWith('http://') && !vpsBaseUrl.startsWith('https://')) {
+        vpsBaseUrl = `https://${vpsBaseUrl}`;
       }
-    );
+    } else if (vpsBaseUrl.startsWith('http://') || vpsBaseUrl.startsWith('https://')) {
+      // URL already has protocol, use as-is
+    } else {
+      // Plain IP, use Instagram port 8001
+      vpsBaseUrl = `http://${vpsBaseUrl}:8001`;
+    }
 
-    // Log raw response details
-    console.log('=== Instagram API Response ===');
-    console.log('HTTP Status:', userInfoResponse.status);
-    console.log('Status Text:', userInfoResponse.statusText);
-    
-    const responseText = await userInfoResponse.text();
-    console.log('Raw Response Body:', responseText);
-    
+    vpsBaseUrl = vpsBaseUrl.replace(/\/$/, '');
+
+    console.log(`Calling VPS for session validation: ${vpsBaseUrl}/validate-session`);
+
+    // Call VPS to validate session
+    const vpsResponse = await fetch(`${vpsBaseUrl}/validate-session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cookies: account.cookies }),
+    });
+
+    const vpsResult = await vpsResponse.json();
+    console.log('VPS Response:', JSON.stringify(vpsResult));
+
     let newStatus: 'active' | 'expired' | 'suspended' = 'expired';
     let updateData: any = {
       last_checked: new Date().toISOString(),
     };
 
-    // Try to parse the response
-    let userInfo: any = null;
-    try {
-      userInfo = JSON.parse(responseText);
-      console.log('Parsed JSON:', JSON.stringify(userInfo, null, 2));
-    } catch (e) {
-      console.log('Failed to parse response as JSON');
-    }
-
-    let isSuspended = false;
-    
-    if (userInfoResponse.ok && userInfo?.user) {
-      const igUser = userInfo.user;
+    if (vpsResult.success && vpsResult.user) {
+      const igUser = vpsResult.user;
       newStatus = 'active';
       updateData = {
         ...updateData,
@@ -149,51 +117,14 @@ serve(async (req) => {
         status: 'active',
       };
       console.log('Session is ACTIVE');
+    } else if (vpsResult.status === 'suspended') {
+      console.log('=== SUSPEND DETECTED ===');
+      newStatus = 'suspended';
+      updateData.status = 'suspended';
     } else {
-      console.log('Session marked as EXPIRED or SUSPENDED');
-      console.log('Reason - Response OK:', userInfoResponse.ok, '| User exists:', !!userInfo?.user);
-      
-      // Check for suspend conditions
-      const hasChallengeRequired = userInfo?.message === 'challenge_required';
-      const hasSuspendedUrl = responseText.includes('instagram.com/accounts/suspended');
-      
-      if (hasChallengeRequired || hasSuspendedUrl) {
-        console.log('=== SUSPEND DETECTED ===');
-        console.log('Challenge required:', hasChallengeRequired);
-        console.log('Suspended URL found:', hasSuspendedUrl);
-        isSuspended = true;
-        newStatus = 'suspended';
-        updateData.status = 'suspended';
-      } else {
-        updateData.status = 'expired';
-      }
-      
-      if (userInfo?.message) console.log('Instagram message:', userInfo.message);
-      if (userInfo?.status) console.log('Instagram status:', userInfo.status);
-      if (userInfo?.error_type) console.log('Error type:', userInfo.error_type);
-      if (userInfo?.spam) console.log('Spam flag:', userInfo.spam);
-      if (userInfo?.lock) console.log('Lock flag:', userInfo.lock);
-      if (userInfo?.checkpoint_url) console.log('Checkpoint URL:', userInfo.checkpoint_url);
+      console.log('Session marked as EXPIRED');
+      updateData.status = 'expired';
     }
-    
-    // Build instagram_response object for frontend debugging
-    let instagramResponse: any = {
-      http_status: userInfoResponse.status,
-      http_status_text: userInfoResponse.statusText,
-      is_suspended: isSuspended,
-    };
-    
-    if (userInfo) {
-      instagramResponse.message = userInfo.message;
-      instagramResponse.status = userInfo.status;
-      instagramResponse.error_type = userInfo.error_type;
-      instagramResponse.spam = userInfo.spam;
-      instagramResponse.lock = userInfo.lock;
-      instagramResponse.checkpoint_url = userInfo.checkpoint_url;
-      instagramResponse.challenge = userInfo.challenge;
-    }
-    
-    console.log('=== Instagram Session Check END ===')
 
     // Update account
     const { error: updateError } = await supabaseClient
@@ -214,7 +145,7 @@ serve(async (req) => {
         success: true, 
         status: newStatus,
         data: updateData,
-        instagram_response: instagramResponse
+        vps_response: vpsResult
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

@@ -66,160 +66,57 @@ serve(async (req) => {
 
     console.log('Posting photo to account:', account.username);
 
-    // Parse cookies - supports string, JSON object, and JSON array formats
-    let cookieObj: Record<string, string> = {};
-    let cookieString = account.cookies;
-    
-    const trimmedCookies = account.cookies.trim();
-    
-    if (trimmedCookies.startsWith('[') && trimmedCookies.endsWith(']')) {
-      try {
-        const jsonArray = JSON.parse(trimmedCookies);
-        jsonArray.forEach((cookie: { name: string; value: string }) => {
-          if (cookie.name && cookie.value) {
-            cookieObj[cookie.name] = cookie.value;
-          }
-        });
-        cookieString = Object.entries(cookieObj)
-          .map(([key, value]) => `${key}=${value}`)
-          .join('; ');
-      } catch (e) {
-        console.error('Failed to parse JSON array cookies:', e);
-      }
-    } else if (trimmedCookies.startsWith('{') && trimmedCookies.endsWith('}')) {
-      try {
-        cookieObj = JSON.parse(trimmedCookies);
-        cookieString = Object.entries(cookieObj)
-          .map(([key, value]) => `${key}=${value}`)
-          .join('; ');
-      } catch (e) {
-        console.error('Failed to parse JSON cookies:', e);
-      }
-    } else {
-      account.cookies.split(';').forEach((cookie: string) => {
-        const [key, value] = cookie.trim().split('=');
-        if (key && value) {
-          cookieObj[key.trim()] = value.trim();
-        }
-      });
-    }
+    // Get VPS IP from admin config
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
 
-    const csrfToken = cookieObj['csrftoken'];
-    const dsUserId = cookieObj['ds_user_id'];
+    const { data: config, error: configError } = await supabaseAdmin
+      .from('telegram_admin_config')
+      .select('vps_ip')
+      .single();
 
-    // Get image buffer
-    let imageBuffer: ArrayBuffer;
-    
-    if (imageUrl) {
-      const imageResponse = await fetch(imageUrl);
-      if (!imageResponse.ok) {
-        return new Response(
-          JSON.stringify({ success: false, error: 'Failed to fetch image from URL' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      imageBuffer = await imageResponse.arrayBuffer();
-    } else {
-      // Handle base64 data
-      const base64Data = imageData.split(',')[1] || imageData;
-      const binaryString = atob(base64Data);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      imageBuffer = bytes.buffer;
-    }
-
-    const uploadId = Date.now().toString();
-    const entityName = `${uploadId}_0_${Math.floor(Math.random() * 9000000000) + 1000000000}`;
-
-    // Step 1: Upload photo
-    console.log('Uploading photo...');
-    const imageLength = imageBuffer.byteLength;
-    
-    const uploadResponse = await fetch(
-      `https://i.instagram.com/rupload_igphoto/${entityName}`,
-      {
-        method: 'POST',
-        headers: {
-          'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229258)',
-          'X-CSRFToken': csrfToken,
-          'X-IG-App-ID': '936619743392459',
-          'X-Entity-Name': entityName,
-          'X-Entity-Length': String(imageLength),
-          'X-Entity-Type': 'image/jpeg',
-          'Offset': '0',
-          'X-Instagram-Rupload-Params': JSON.stringify({
-            upload_id: uploadId,
-            media_type: 1,
-            retry_context: JSON.stringify({
-              num_step_auto_retry: 0,
-              num_reupload: 0,
-              num_step_manual_retry: 0,
-            }),
-            image_compression: JSON.stringify({
-              lib_name: 'moz',
-              lib_version: '3.1.m',
-              quality: '80',
-            }),
-          }),
-          'Cookie': cookieString,
-          'Content-Type': 'application/octet-stream',
-        },
-        body: new Uint8Array(imageBuffer),
-      }
-    );
-
-    if (!uploadResponse.ok) {
-      const errorText = await uploadResponse.text();
-      console.error('Upload failed:', errorText);
+    if (configError || !config?.vps_ip) {
+      console.error('VPS IP not configured:', configError);
       return new Response(
-        JSON.stringify({ success: false, error: 'Failed to upload photo' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const uploadResult = await uploadResponse.json();
-    console.log('Upload result:', uploadResult);
-
-    // Step 2: Configure media
-    console.log('Configuring media...');
-    const configureResponse = await fetch(
-      'https://i.instagram.com/api/v1/media/configure/',
-      {
-        method: 'POST',
-        headers: {
-          'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229258)',
-          'X-CSRFToken': csrfToken,
-          'X-IG-App-ID': '936619743392459',
-          'Cookie': cookieString,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          upload_id: uploadId,
-          source_type: '4',
-          caption: '',
-          _csrftoken: csrfToken,
-          _uid: dsUserId,
-          device_id: 'android-' + Math.random().toString(36).substring(2, 15),
-          timezone_offset: '0',
-        }).toString(),
-      }
-    );
-
-    const configureResult = await configureResponse.json();
-    console.log('Configure result:', configureResult);
-
-    if (!configureResponse.ok || configureResult.status !== 'ok') {
-      const errorMessage = configureResult.message || 'Failed to configure media';
-      console.error('Configure failed:', JSON.stringify(configureResult));
-      return new Response(
-        JSON.stringify({ success: false, error: errorMessage }),
+        JSON.stringify({ success: false, error: 'VPS IP not configured in admin panel' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    if (configureResult.status === 'ok') {
+    let vpsBaseUrl = config.vps_ip;
+    
+    // Handle different URL formats
+    if (vpsBaseUrl.includes('.ngrok') || vpsBaseUrl.includes('ngrok-free.app')) {
+      if (!vpsBaseUrl.startsWith('http://') && !vpsBaseUrl.startsWith('https://')) {
+        vpsBaseUrl = `https://${vpsBaseUrl}`;
+      }
+    } else if (vpsBaseUrl.startsWith('http://') || vpsBaseUrl.startsWith('https://')) {
+      // URL already has protocol, use as-is
+    } else {
+      // Plain IP, use Instagram port 8001
+      vpsBaseUrl = `http://${vpsBaseUrl}:8001`;
+    }
+
+    vpsBaseUrl = vpsBaseUrl.replace(/\/$/, '');
+
+    console.log(`Calling VPS for photo post: ${vpsBaseUrl}/post-photo`);
+
+    // Call VPS to post photo
+    const vpsResponse = await fetch(`${vpsBaseUrl}/post-photo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cookies: account.cookies,
+        image_url: imageUrl,
+        image_data: imageData,
+      }),
+    });
+
+    const vpsResult = await vpsResponse.json();
+    console.log('VPS Response:', JSON.stringify(vpsResult));
+
+    if (vpsResult.success) {
       // Update posts count
       await supabaseClient
         .from('instagram_accounts')
@@ -229,14 +126,27 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ 
           success: true, 
-          mediaId: configureResult.media?.id 
+          mediaId: vpsResult.media_id 
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     } else {
+      // Check if account is suspended/expired
+      if (vpsResult.status === 'suspended') {
+        await supabaseClient
+          .from('instagram_accounts')
+          .update({ status: 'suspended' })
+          .eq('id', accountId);
+      } else if (vpsResult.status === 'expired') {
+        await supabaseClient
+          .from('instagram_accounts')
+          .update({ status: 'expired' })
+          .eq('id', accountId);
+      }
+
       return new Response(
-        JSON.stringify({ success: false, error: configureResult.message || 'Failed to post' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ success: false, error: vpsResult.error || 'Failed to post photo' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
