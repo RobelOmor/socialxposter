@@ -20,6 +20,8 @@ interface MobileSessionCardProps {
   index: number;
   selected: boolean;
   unreadCount?: number;
+  dailyQuotaRemaining?: number;
+  dailyLimit?: number;
   onSelect: (checked: boolean) => void;
   onValidate: () => void;
   onSendMessage: () => void;
@@ -33,6 +35,8 @@ export function MobileSessionCard({
   index,
   selected,
   unreadCount,
+  dailyQuotaRemaining = 5,
+  dailyLimit = 5,
   onSelect,
   onValidate,
   onSendMessage,
@@ -73,10 +77,16 @@ export function MobileSessionCard({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 text-center text-xs">
+      <div className="grid grid-cols-4 gap-2 text-center text-xs">
         <div className="bg-secondary/50 rounded-lg py-2">
           <p className="font-semibold text-foreground">{session.messages_sent || 0}</p>
-          <p className="text-muted-foreground">Messages</p>
+          <p className="text-muted-foreground">Sent</p>
+        </div>
+        <div className="bg-secondary/50 rounded-lg py-2">
+          <p className={`font-semibold ${dailyQuotaRemaining > 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {dailyQuotaRemaining}/{dailyLimit}
+          </p>
+          <p className="text-muted-foreground">Today</p>
         </div>
         <div className="bg-secondary/50 rounded-lg py-2">
           <button

@@ -37,6 +37,9 @@ import {
 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 
+// Daily message limit per session (to prevent bans)
+const DAILY_MESSAGE_LIMIT = 5;
+
 interface TelegramSession {
   id: string;
   phone_number: string;
@@ -129,9 +132,13 @@ export default function TelegramManage() {
   const [replyingTo, setReplyingTo] = useState<UnreadMessage | null>(null);
   const [sendingReply, setSendingReply] = useState(false);
 
+  // Daily message counts per session (to track limits)
+  const [dailyMessageCounts, setDailyMessageCounts] = useState<Record<string, number>>({});
+
   useEffect(() => {
     if (user) {
       fetchSessions();
+      fetchDailyMessageCounts();
     }
   }, [user]);
 
@@ -152,7 +159,36 @@ export default function TelegramManage() {
     setLoading(false);
   };
 
-  // Selection handlers
+  // Fetch today's message count for all sessions
+  const fetchDailyMessageCounts = async () => {
+    if (!user) return;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const { data: messages } = await supabase
+      .from('telegram_messages')
+      .select('session_id')
+      .eq('user_id', user.id)
+      .eq('status', 'sent')
+      .gte('sent_at', today.toISOString());
+    
+    if (messages) {
+      const counts: Record<string, number> = {};
+      messages.forEach(msg => {
+        if (msg.session_id) {
+          counts[msg.session_id] = (counts[msg.session_id] || 0) + 1;
+        }
+      });
+      setDailyMessageCounts(counts);
+    }
+  };
+
+  // Get remaining daily quota for a session
+  const getRemainingQuota = (sessionId: string) => {
+    const used = dailyMessageCounts[sessionId] || 0;
+    return Math.max(0, DAILY_MESSAGE_LIMIT - used);
+  };
   const handleSelectSession = (sessionId: string, checked: boolean) => {
     const newSelected = new Set(selectedSessions);
     if (checked) {
@@ -432,6 +468,13 @@ export default function TelegramManage() {
       return;
     }
 
+    // Check daily limit
+    const remaining = getRemainingQuota(singleSession.id);
+    if (remaining <= 0) {
+      toast.error(`Daily limit reached for this session (${DAILY_MESSAGE_LIMIT}/day). Try again tomorrow.`);
+      return;
+    }
+
     setSendingSingle(true);
     try {
       const data = await callVpsProxy('/send-message', {
@@ -477,6 +520,7 @@ export default function TelegramManage() {
       setSingleContent('');
       setSingleSession(null);
       fetchSessions();
+      fetchDailyMessageCounts(); // Refresh daily counts
     } catch (error: any) {
       toast.error(error.message || 'Failed to send message');
     } finally {
@@ -607,6 +651,7 @@ export default function TelegramManage() {
   };
 
   // Bulk Sender - sends from selected sessions to available usernames (1 session = 1 unique username)
+  // Each session has a daily limit of 5 messages
   const handleBulkSender = async () => {
     if (selectedSessions.size === 0) {
       toast.error('Select at least one session');
@@ -621,13 +666,16 @@ export default function TelegramManage() {
     setBulkSenderProgress(0);
     setBulkSenderReport(null);
 
-    // Get selected active sessions
+    // Refresh daily counts first
+    await fetchDailyMessageCounts();
+
+    // Get selected active sessions with remaining quota
     const selectedSessionsArray = sessions.filter(s => 
-      selectedSessions.has(s.id) && s.status === 'active'
+      selectedSessions.has(s.id) && s.status === 'active' && getRemainingQuota(s.id) > 0
     );
 
     if (selectedSessionsArray.length === 0) {
-      toast.error('No active sessions selected');
+      toast.error('No active sessions with remaining daily quota. Each session can send max 5 messages/day.');
       setBulkSenderSending(false);
       return;
     }
@@ -661,14 +709,26 @@ export default function TelegramManage() {
       return;
     }
 
-    // Each session gets 1 unique username
+    // Each session gets 1 unique username (respecting daily limit)
     const totalToSend = Math.min(selectedSessionsArray.length, availableUsernames.length);
     let successCount = 0;
     let failCount = 0;
+    let skippedCount = 0;
+    
+    // Track daily counts locally during bulk send
+    const localDailyCounts = { ...dailyMessageCounts };
 
     for (let i = 0; i < totalToSend; i++) {
       const session = selectedSessionsArray[i];
       const usernameData = availableUsernames[i];
+
+      // Check if session still has remaining quota
+      const currentCount = localDailyCounts[session.id] || 0;
+      if (currentCount >= DAILY_MESSAGE_LIMIT) {
+        skippedCount++;
+        setBulkSenderProgress(((i + 1) / totalToSend) * 100);
+        continue;
+      }
 
       try {
         const data = await callVpsProxy('/send-message', {
@@ -722,6 +782,9 @@ export default function TelegramManage() {
               sent_at: new Date().toISOString(),
             });
           }
+          
+          // Update local count
+          localDailyCounts[session.id] = currentCount + 1;
           successCount++;
         }
       } catch (error: any) {
@@ -743,7 +806,8 @@ export default function TelegramManage() {
 
     setBulkSenderSending(false);
     fetchSessions();
-    toast.success(`Bulk send complete: ${successCount} success, ${failCount} failed`);
+    fetchDailyMessageCounts(); // Refresh daily counts
+    toast.success(`Bulk send complete: ${successCount} success, ${failCount} failed${skippedCount > 0 ? `, ${skippedCount} skipped (limit)` : ''}`);
   };
 
   // Filter sessions
@@ -903,6 +967,8 @@ export default function TelegramManage() {
                     index={index + 1}
                     selected={selectedSessions.has(session.id)}
                     unreadCount={unreadCounts[session.id]}
+                    dailyQuotaRemaining={getRemainingQuota(session.id)}
+                    dailyLimit={DAILY_MESSAGE_LIMIT}
                     onSelect={(checked) => handleSelectSession(session.id, !!checked)}
                     onValidate={() => handleValidateSession(session)}
                     onSendMessage={() => {
@@ -963,7 +1029,14 @@ export default function TelegramManage() {
                           <span className="text-xs text-muted-foreground">No proxy</span>
                         )}
                       </TableCell>
-                      <TableCell>{session.messages_sent || 0}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span>{session.messages_sent || 0}</span>
+                          <span className={`text-xs ${getRemainingQuota(session.id) > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {getRemainingQuota(session.id)}/{DAILY_MESSAGE_LIMIT} today
+                          </span>
+                        </div>
+                      </TableCell>
                       <TableCell>
                         <Button
                           variant="ghost"
@@ -1078,6 +1151,21 @@ export default function TelegramManage() {
           </DialogHeader>
 
           <div className="space-y-4">
+            {/* Daily Limit Warning */}
+            {singleSession && (
+              <div className={`p-3 rounded-lg text-sm flex items-center gap-2 ${
+                getRemainingQuota(singleSession.id) > 0 
+                  ? 'bg-blue-500/10 border border-blue-500/20' 
+                  : 'bg-red-500/10 border border-red-500/20'
+              }`}>
+                <AlertCircle className={`h-4 w-4 ${getRemainingQuota(singleSession.id) > 0 ? 'text-blue-400' : 'text-red-400'}`} />
+                <span>
+                  Daily limit: <strong>{getRemainingQuota(singleSession.id)}/{DAILY_MESSAGE_LIMIT}</strong> remaining
+                  {getRemainingQuota(singleSession.id) === 0 && ' (Try again tomorrow)'}
+                </span>
+              </div>
+            )}
+            
             <div>
               <Label>Username or ID</Label>
               <Input
@@ -1107,7 +1195,11 @@ export default function TelegramManage() {
               >
                 Cancel
               </Button>
-              <Button onClick={handleSendSingleMessage} disabled={sendingSingle} className="gap-2">
+              <Button 
+                onClick={handleSendSingleMessage} 
+                disabled={sendingSingle || (singleSession ? getRemainingQuota(singleSession.id) <= 0 : false)} 
+                className="gap-2"
+              >
                 {sendingSingle ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
@@ -1199,8 +1291,25 @@ export default function TelegramManage() {
           </DialogHeader>
           
           <div className="space-y-4">
+            {/* Daily Limit Info */}
+            <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-sm">
+              <div className="flex items-center gap-2 text-yellow-400 font-medium mb-1">
+                <AlertCircle className="h-4 w-4" />
+                Daily Limit: {DAILY_MESSAGE_LIMIT} messages/session/day
+              </div>
+              <p className="text-muted-foreground text-xs">
+                To prevent session bans, each session can only send {DAILY_MESSAGE_LIMIT} messages to new usernames per 24 hours. 
+                Replies to users who responded are unlimited.
+              </p>
+            </div>
+            
             <div className="p-3 bg-muted rounded-lg text-sm">
               <p><strong>Selected Sessions:</strong> {selectedSessions.size}</p>
+              <p className="text-green-400 text-xs mt-1">
+                Sessions with quota: {sessions.filter(s => 
+                  selectedSessions.has(s.id) && s.status === 'active' && getRemainingQuota(s.id) > 0
+                ).length}
+              </p>
               <p className="text-muted-foreground text-xs mt-1">
                 Each session will message 1 unique username from your available usernames list.
               </p>
