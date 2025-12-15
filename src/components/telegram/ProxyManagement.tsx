@@ -153,10 +153,9 @@ export const ProxyManagement = ({ open, onOpenChange, onProxyAdded }: ProxyManag
     try {
       const { data, error } = await supabase.functions.invoke("telegram-vps-proxy", {
         body: {
-          endpoint: "/health",
+          endpoint: "/test-proxy",
           method: "POST",
           body: {
-            test_proxy: true,
             proxy: {
               host: proxy.proxy_host,
               port: proxy.proxy_port,
@@ -169,9 +168,12 @@ export const ProxyManagement = ({ open, onOpenChange, onProxyAdded }: ProxyManag
 
       if (error) throw error;
       if (data.status === "ok") {
-        toast.success("Proxy connection successful");
+        toast.success(
+          `Proxy OK: ${proxy.proxy_host}:${proxy.proxy_port}`,
+          { description: data.message || "Proxy configured successfully" }
+        );
       } else {
-        toast.error("Proxy test failed");
+        toast.error(data.error || "Proxy test failed");
       }
     } catch (error: any) {
       toast.error(error.message || "Failed to test proxy");

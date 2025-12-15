@@ -16,7 +16,7 @@ export interface TelegramProxy {
 export const useTelegramProxies = () => {
   const { user } = useAuth();
   const [proxies, setProxies] = useState<TelegramProxy[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const fetchProxies = useCallback(async () => {
     if (!user) return;

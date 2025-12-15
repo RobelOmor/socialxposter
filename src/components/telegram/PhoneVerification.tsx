@@ -1,12 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
-import { Phone, Shield, Loader2, CheckCircle2, User, Save } from "lucide-react";
+import { Phone, Shield, Loader2, CheckCircle2, User, Save, Globe, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { useTelegramProxies, TelegramProxy } from "@/hooks/useTelegramProxies";
 
 interface PhoneVerificationProps {
   apiId: string;
@@ -22,6 +22,8 @@ interface SessionData {
 }
 
 export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerificationProps) => {
+  const { availableProxies, markProxyAsUsed, fetchProxies, loading: proxiesLoading } = useTelegramProxies();
+  
   const [step, setStep] = useState<"phone" | "code" | "password" | "confirm" | "success">("phone");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
@@ -30,12 +32,19 @@ export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerif
   const [isLoading, setIsLoading] = useState(false);
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
   
-  // Proxy toggle and config
-  const [useProxy, setUseProxy] = useState(false);
-  const [proxyHost, setProxyHost] = useState("");
-  const [proxyPort, setProxyPort] = useState("");
-  const [proxyUsername, setProxyUsername] = useState("");
-  const [proxyPassword, setProxyPassword] = useState("");
+  // Auto-selected proxy from available proxies
+  const [selectedProxy, setSelectedProxy] = useState<TelegramProxy | null>(null);
+
+  // Fetch proxies and auto-select the first available one
+  useEffect(() => {
+    fetchProxies();
+  }, [fetchProxies]);
+
+  useEffect(() => {
+    if (availableProxies.length > 0 && !selectedProxy) {
+      setSelectedProxy(availableProxies[0]);
+    }
+  }, [availableProxies, selectedProxy]);
 
   const callVpsProxy = async (endpoint: string, body: any) => {
     const { data, error } = await supabase.functions.invoke("telegram-vps-proxy", {
@@ -51,18 +60,23 @@ export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerif
   };
 
   const getProxyConfig = () => {
-    if (!useProxy || !proxyHost) return null;
+    if (!selectedProxy) return null;
     return {
-      host: proxyHost,
-      port: parseInt(proxyPort) || 1080,
-      username: proxyUsername || null,
-      password: proxyPassword || null,
+      host: selectedProxy.proxy_host,
+      port: selectedProxy.proxy_port,
+      username: selectedProxy.proxy_username,
+      password: selectedProxy.proxy_password,
     };
   };
 
   const handleSendCode = async () => {
     if (!phoneNumber.trim()) {
       toast.error("Enter phone number");
+      return;
+    }
+
+    if (!selectedProxy) {
+      toast.error("Please add proxy first then add session");
       return;
     }
 
@@ -106,7 +120,6 @@ export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerif
 
       console.log("Verify code response:", JSON.stringify(data, null, 2));
 
-      // Handle various success response formats from VPS
       const isSuccess = data.success === true || data.status === "ok" || data.session_data;
       const needsPassword = data.requires_password || data.password_required || data.need_password;
       
@@ -114,7 +127,6 @@ export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerif
         setStep("password");
         toast.info("2FA password required");
       } else if (isSuccess && data.session_data) {
-        // Show confirmation step with user info
         setSessionData({
           session_data: data.session_data,
           user_name: data.telegram_name || data.user_name || data.username || data.name || null,
@@ -124,7 +136,6 @@ export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerif
         setStep("confirm");
         toast.success("Verified! Please confirm to save session.");
       } else if (isSuccess && !data.session_data) {
-        // VPS returned success but no session data - might need to check status
         toast.error("Verification succeeded but no session data returned. Check VPS logs.");
         console.error("Missing session_data in response:", data);
       } else {
@@ -156,7 +167,6 @@ export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerif
       });
 
       if (data.success) {
-        // Show confirmation step with user info
         setSessionData({
           session_data: data.session_data,
           user_name: data.user_name || null,
@@ -175,7 +185,7 @@ export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerif
   };
 
   const handleSaveSession = async () => {
-    if (!sessionData) return;
+    if (!sessionData || !selectedProxy) return;
 
     setIsLoading(true);
     try {
@@ -186,24 +196,28 @@ export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerif
         return;
       }
 
-      const { error } = await supabase.from("telegram_sessions").upsert({
+      const { data: insertedSession, error } = await supabase.from("telegram_sessions").upsert({
         user_id: user.id,
         phone_number: phoneNumber,
         session_name: phoneNumber,
         session_data: sessionData.session_data,
         telegram_name: sessionData.user_name || sessionData.first_name || null,
         status: "active",
-        proxy_host: useProxy && proxyHost ? proxyHost : null,
-        proxy_port: useProxy && proxyPort ? parseInt(proxyPort) : null,
-        proxy_username: useProxy && proxyUsername ? proxyUsername : null,
-        proxy_password: useProxy && proxyPassword ? proxyPassword : null,
+        proxy_host: selectedProxy.proxy_host,
+        proxy_port: selectedProxy.proxy_port,
+        proxy_username: selectedProxy.proxy_username,
+        proxy_password: selectedProxy.proxy_password,
       }, {
         onConflict: "phone_number,user_id",
-      });
+      }).select().single();
 
       if (error) {
         toast.error("Failed to save session");
       } else {
+        // Mark proxy as used
+        if (insertedSession) {
+          await markProxyAsUsed(selectedProxy.id, insertedSession.id);
+        }
         setStep("success");
         toast.success("Session saved successfully!");
         onSessionAdded();
@@ -221,11 +235,8 @@ export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerif
     setPassword("");
     setPhoneCodeHash("");
     setSessionData(null);
-    setUseProxy(false);
-    setProxyHost("");
-    setProxyPort("");
-    setProxyUsername("");
-    setProxyPassword("");
+    setSelectedProxy(null);
+    fetchProxies();
   };
 
   if (step === "success") {
@@ -246,6 +257,8 @@ export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerif
     );
   }
 
+  const hasNoProxy = !proxiesLoading && availableProxies.length === 0;
+
   return (
     <Card className="bg-card border-border">
       <CardHeader>
@@ -255,61 +268,29 @@ export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerif
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Proxy Toggle */}
-        {step === "phone" && (
-          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-border">
-            <div className="space-y-0.5">
-              <Label className="text-sm font-medium text-foreground">Use Proxy</Label>
-              <p className="text-xs text-muted-foreground">Connect via SOCKS5 proxy</p>
-            </div>
-            <Switch
-              checked={useProxy}
-              onCheckedChange={setUseProxy}
-            />
+        {/* No Proxy Warning */}
+        {hasNoProxy && step === "phone" && (
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive">
+            <AlertCircle className="h-5 w-5 flex-shrink-0" />
+            <span className="text-sm">Please add proxy first then add session</span>
           </div>
         )}
 
-        {/* Proxy Configuration - only show when toggle is on */}
-        {useProxy && step === "phone" && (
-          <div className="grid grid-cols-2 gap-3 p-3 rounded-lg border border-border bg-muted/30">
-            <div>
-              <Label className="text-muted-foreground text-sm">Proxy Host</Label>
-              <Input
-                placeholder="proxy.example.com"
-                value={proxyHost}
-                onChange={(e) => setProxyHost(e.target.value)}
-                className="bg-background"
-              />
+        {/* Auto-selected Proxy Display */}
+        {selectedProxy && step === "phone" && (
+          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-border">
+            <div className="flex items-center gap-2">
+              <Globe className="h-4 w-4 text-primary" />
+              <div>
+                <p className="text-sm font-medium text-foreground">System Proxy (Auto)</p>
+                <p className="text-xs text-muted-foreground font-mono">
+                  {selectedProxy.proxy_host}:{selectedProxy.proxy_port}
+                </p>
+              </div>
             </div>
-            <div>
-              <Label className="text-muted-foreground text-sm">Proxy Port</Label>
-              <Input
-                placeholder="1080"
-                type="number"
-                value={proxyPort}
-                onChange={(e) => setProxyPort(e.target.value)}
-                className="bg-background"
-              />
-            </div>
-            <div>
-              <Label className="text-muted-foreground text-sm">Proxy Username</Label>
-              <Input
-                placeholder="username"
-                value={proxyUsername}
-                onChange={(e) => setProxyUsername(e.target.value)}
-                className="bg-background"
-              />
-            </div>
-            <div>
-              <Label className="text-muted-foreground text-sm">Proxy Password</Label>
-              <Input
-                placeholder="password"
-                type="password"
-                value={proxyPassword}
-                onChange={(e) => setProxyPassword(e.target.value)}
-                className="bg-background"
-              />
-            </div>
+            <span className="text-xs text-green-400 bg-green-500/20 px-2 py-1 rounded">
+              {availableProxies.length} available
+            </span>
           </div>
         )}
 
@@ -323,9 +304,14 @@ export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerif
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
                 className="bg-background"
+                disabled={hasNoProxy}
               />
             </div>
-            <Button onClick={handleSendCode} disabled={isLoading} className="w-full gap-2">
+            <Button 
+              onClick={handleSendCode} 
+              disabled={isLoading || hasNoProxy} 
+              className="w-full gap-2"
+            >
               {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4" />}
               Send Verification Code
             </Button>
@@ -396,9 +382,10 @@ export const PhoneVerification = ({ apiId, apiHash, onSessionAdded }: PhoneVerif
                 {sessionData.user_name || sessionData.first_name || "Unknown User"}
               </h3>
               <p className="text-sm text-muted-foreground">{phoneNumber}</p>
-              {useProxy && proxyHost && (
-                <p className="text-xs text-muted-foreground mt-2">
-                  Proxy: {proxyHost}:{proxyPort || "1080"}
+              {selectedProxy && (
+                <p className="text-xs text-muted-foreground mt-2 flex items-center justify-center gap-1">
+                  <Globe className="h-3 w-3" />
+                  Proxy: {selectedProxy.proxy_host}:{selectedProxy.proxy_port}
                 </p>
               )}
             </div>
