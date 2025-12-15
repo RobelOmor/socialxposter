@@ -1,0 +1,86 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+serve(async (req) => {
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const { endpoint, ...params } = await req.json();
+    
+    console.log(`Instagram VPS Proxy - Endpoint: ${endpoint}`);
+
+    // Get admin config for VPS IP
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Fetch VPS IP from admin config (using same config as Telegram for now)
+    const { data: config, error: configError } = await supabase
+      .from('telegram_admin_config')
+      .select('vps_ip')
+      .single();
+
+    if (configError || !config?.vps_ip) {
+      console.error('VPS IP not configured:', configError);
+      return new Response(
+        JSON.stringify({ error: 'VPS IP not configured in admin panel' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    let vpsBaseUrl = config.vps_ip;
+    
+    // Handle different URL formats
+    if (vpsBaseUrl.includes('.ngrok') || vpsBaseUrl.includes('ngrok-free.app')) {
+      if (!vpsBaseUrl.startsWith('http://') && !vpsBaseUrl.startsWith('https://')) {
+        vpsBaseUrl = `https://${vpsBaseUrl}`;
+      }
+    } else if (vpsBaseUrl.startsWith('http://') || vpsBaseUrl.startsWith('https://')) {
+      // URL already has protocol, use as-is
+    } else {
+      // Plain IP, use Instagram port 8001
+      vpsBaseUrl = `http://${vpsBaseUrl}:8001`;
+    }
+
+    // Remove trailing slash
+    vpsBaseUrl = vpsBaseUrl.replace(/\/$/, '');
+
+    const vpsUrl = `${vpsBaseUrl}${endpoint}`;
+    console.log(`Forwarding to VPS: ${vpsUrl}`);
+
+    // Forward request to VPS
+    const response = await fetch(vpsUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(params),
+    });
+
+    const data = await response.json();
+    console.log(`VPS Response status: ${response.status}`);
+
+    return new Response(
+      JSON.stringify(data),
+      { 
+        status: response.status, 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      }
+    );
+  } catch (error: unknown) {
+    console.error('Instagram VPS Proxy Error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Failed to connect to VPS';
+    return new Response(
+      JSON.stringify({ error: errorMessage }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+});
