@@ -33,7 +33,9 @@ import {
   AlertCircle,
   Mail,
   Globe,
-  Users
+  Users,
+  MessageCircle,
+  Eye
 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 
@@ -64,6 +66,24 @@ interface UnreadMessage {
   text: string;
   message_id: number;
   date: string;
+}
+
+interface ReplyGroupData {
+  from_user: string;
+  from_user_id: string | null;
+  session_id: string;
+  session_phone: string;
+  session_name: string | null;
+  last_reply_at: string;
+  reply_count: number;
+  replies: {
+    id: string;
+    message_content: string;
+    reply_content: string | null;
+    replied: boolean;
+    created_at: string;
+    replied_at: string | null;
+  }[];
 }
 
 export default function TelegramManage() {
@@ -137,6 +157,15 @@ export default function TelegramManage() {
   // Daily message counts per session (to track limits)
   const [dailyMessageCounts, setDailyMessageCounts] = useState<Record<string, number>>({});
 
+  // Get Reply state
+  const [getReplyOpen, setGetReplyOpen] = useState(false);
+  const [replyGroups, setReplyGroups] = useState<ReplyGroupData[]>([]);
+  const [loadingReplies, setLoadingReplies] = useState(false);
+  const [conversationOpen, setConversationOpen] = useState(false);
+  const [selectedReplyGroup, setSelectedReplyGroup] = useState<ReplyGroupData | null>(null);
+  const [conversationReplyContent, setConversationReplyContent] = useState('');
+  const [sendingConversationReply, setSendingConversationReply] = useState(false);
+
   useEffect(() => {
     if (user) {
       fetchSessions();
@@ -190,6 +219,135 @@ export default function TelegramManage() {
   const getRemainingQuota = (sessionId: string) => {
     const used = dailyMessageCounts[sessionId] || 0;
     return Math.max(0, DAILY_MESSAGE_LIMIT - used);
+  };
+
+  // Fetch all replies grouped by from_user and session
+  const fetchReplyGroups = async () => {
+    if (!user) return;
+    setLoadingReplies(true);
+
+    // Fetch replies
+    const { data: replies, error } = await supabase
+      .from('telegram_replies')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      toast.error('Failed to fetch replies');
+      setLoadingReplies(false);
+      return;
+    }
+
+    // Group by from_user + session_id
+    const groupMap = new Map<string, ReplyGroupData>();
+    
+    for (const reply of replies || []) {
+      const key = `${reply.from_user}-${reply.session_id}`;
+      const session = sessions.find(s => s.id === reply.session_id);
+      
+      if (!groupMap.has(key)) {
+        groupMap.set(key, {
+          from_user: reply.from_user,
+          from_user_id: reply.from_user_id,
+          session_id: reply.session_id || '',
+          session_phone: session?.phone_number || 'Unknown',
+          session_name: session?.telegram_name || null,
+          last_reply_at: reply.created_at,
+          reply_count: 0,
+          replies: [],
+        });
+      }
+
+      const group = groupMap.get(key)!;
+      group.reply_count++;
+      if (group.replies.length < 10) {
+        group.replies.push({
+          id: reply.id,
+          message_content: reply.message_content,
+          reply_content: reply.reply_content,
+          replied: reply.replied || false,
+          created_at: reply.created_at,
+          replied_at: reply.replied_at,
+        });
+      }
+      // Update last reply time
+      if (new Date(reply.created_at) > new Date(group.last_reply_at)) {
+        group.last_reply_at = reply.created_at;
+      }
+    }
+
+    setReplyGroups(Array.from(groupMap.values()));
+    setLoadingReplies(false);
+  };
+
+  // Open Get Reply dialog
+  const openGetReply = () => {
+    setGetReplyOpen(true);
+    fetchReplyGroups();
+  };
+
+  // Open conversation view
+  const openConversation = (group: ReplyGroupData) => {
+    setSelectedReplyGroup(group);
+    setConversationReplyContent('');
+    setConversationOpen(true);
+  };
+
+  // Send reply from conversation view
+  const handleConversationReply = async () => {
+    if (!selectedReplyGroup || !conversationReplyContent.trim()) {
+      toast.error('Enter a reply message');
+      return;
+    }
+
+    const session = sessions.find(s => s.id === selectedReplyGroup.session_id);
+    if (!session) {
+      toast.error('Session not found');
+      return;
+    }
+
+    // MUST use proxy for reply
+    if (!session.proxy_host) {
+      toast.error('Session has no proxy configured. Proxy is required for replies.');
+      return;
+    }
+
+    setSendingConversationReply(true);
+    try {
+      const data = await callVpsProxy('/send-message', {
+        session_data: session.session_data,
+        destination: selectedReplyGroup.from_user_id || selectedReplyGroup.from_user,
+        message: conversationReplyContent.trim(),
+        proxy: {
+          host: session.proxy_host,
+          port: session.proxy_port,
+          username: session.proxy_username,
+          password: session.proxy_password,
+        },
+      });
+
+      if (data && (data as any).error) {
+        throw new Error((data as any).error);
+      }
+
+      // Update session stats
+      await supabase
+        .from('telegram_sessions')
+        .update({
+          messages_sent: (session.messages_sent || 0) + 1,
+          last_used_at: new Date().toISOString(),
+        })
+        .eq('id', session.id);
+
+      toast.success(`Reply sent to @${selectedReplyGroup.from_user}`);
+      setConversationReplyContent('');
+      fetchReplyGroups();
+      fetchSessions();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to send reply');
+    }
+    setSendingConversationReply(false);
   };
   const handleSelectSession = (sessionId: string, checked: boolean) => {
     const newSelected = new Set(selectedSessions);
@@ -879,6 +1037,10 @@ export default function TelegramManage() {
             <Button onClick={() => setAddSessionOpen(true)} size="sm" className="gap-1.5 flex-1 sm:flex-none">
               <Plus className="h-4 w-4" />
               <span className="hidden sm:inline">Add</span> Session
+            </Button>
+            <Button onClick={openGetReply} variant="outline" size="sm" className="gap-1.5 flex-1 sm:flex-none bg-purple-600/20 border-purple-500/30 hover:bg-purple-600/30">
+              <MessageCircle className="h-4 w-4" />
+              Get_Reply
             </Button>
           </div>
         </div>
@@ -1596,6 +1758,161 @@ export default function TelegramManage() {
           status: s.status
         }))}
       />
+
+      {/* Get Reply Dialog */}
+      <Dialog open={getReplyOpen} onOpenChange={setGetReplyOpen}>
+        <DialogContent className="sm:max-w-4xl max-h-[85vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageCircle className="h-5 w-5 text-purple-500" />
+              All Replies
+            </DialogTitle>
+            <DialogDescription>
+              View all incoming replies from Telegram users
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-2">
+            {loadingReplies ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : replyGroups.length === 0 ? (
+              <div className="text-center py-8">
+                <MessageSquare className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
+                <p className="text-muted-foreground">No replies found</p>
+              </div>
+            ) : (
+              <ScrollArea className="max-h-[55vh]">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>From People</TableHead>
+                      <TableHead>To People (Session)</TableHead>
+                      <TableHead>Last Reply</TableHead>
+                      <TableHead className="text-right">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {replyGroups.map((group, idx) => (
+                      <TableRow key={idx}>
+                        <TableCell className="font-medium">
+                          <span className="text-purple-400">@{group.from_user}</span>
+                        </TableCell>
+                        <TableCell>
+                          <div className="text-sm">
+                            <div>{group.session_name || group.session_phone}</div>
+                            <div className="text-xs text-muted-foreground">{group.session_phone}</div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-sm">
+                          {new Date(group.last_reply_at).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button 
+                            size="sm" 
+                            variant="outline" 
+                            onClick={() => openConversation(group)}
+                            className="gap-1.5"
+                          >
+                            <Eye className="h-4 w-4" />
+                            View Reply ({group.reply_count})
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            )}
+          </div>
+
+          <div className="flex justify-between items-center mt-4">
+            <Button variant="outline" size="sm" onClick={fetchReplyGroups} disabled={loadingReplies}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${loadingReplies ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+            <Button variant="outline" onClick={() => setGetReplyOpen(false)}>
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Conversation View Dialog */}
+      <Dialog open={conversationOpen} onOpenChange={setConversationOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[85vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageCircle className="h-5 w-5 text-purple-500" />
+              Conversation with @{selectedReplyGroup?.from_user}
+            </DialogTitle>
+            <DialogDescription>
+              Last 10 messages • Session: {selectedReplyGroup?.session_name || selectedReplyGroup?.session_phone}
+            </DialogDescription>
+          </DialogHeader>
+
+          <ScrollArea className="max-h-[45vh] mt-2">
+            <div className="space-y-3">
+              {selectedReplyGroup?.replies.map((reply, idx) => (
+                <div key={idx} className="p-3 rounded-lg border border-border bg-muted/30">
+                  {/* Incoming message */}
+                  <div className="mb-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Badge variant="outline" className="text-purple-400 border-purple-500/30 text-xs">
+                        @{selectedReplyGroup.from_user}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(reply.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                    <p className="text-sm bg-purple-500/10 p-2 rounded">{reply.message_content}</p>
+                  </div>
+
+                  {/* Reply sent (if any) */}
+                  {reply.replied && reply.reply_content && (
+                    <div className="ml-4 mt-2">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Badge variant="outline" className="text-green-400 border-green-500/30 text-xs">
+                          You
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">
+                          {reply.replied_at ? new Date(reply.replied_at).toLocaleString() : ''}
+                        </span>
+                      </div>
+                      <p className="text-sm bg-green-500/10 p-2 rounded">{reply.reply_content}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+
+          {/* Reply Box */}
+          <div className="mt-4 space-y-3">
+            <Textarea
+              placeholder="Type your reply..."
+              value={conversationReplyContent}
+              onChange={(e) => setConversationReplyContent(e.target.value)}
+              rows={2}
+              disabled={sendingConversationReply}
+            />
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setConversationOpen(false)}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleConversationReply} 
+                disabled={sendingConversationReply || !conversationReplyContent.trim()}
+                className="gap-2"
+              >
+                {sendingConversationReply ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                Send Reply
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }
