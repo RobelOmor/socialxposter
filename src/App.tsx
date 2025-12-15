@@ -17,6 +17,7 @@ import AdminPhotoServer from "./pages/admin/AdminPhotoServer";
 import AdminTelegramSessions from "./pages/admin/AdminTelegramSessions";
 import TelegramSession from "./pages/TelegramSession";
 import TelegramManage from "./pages/TelegramManage";
+import TelegramReplies from "./pages/TelegramReplies";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -74,6 +75,7 @@ function AppRoutes() {
       <Route path="/admin/telegram-sessions" element={<ProtectedRoute><AdminTelegramSessions /></ProtectedRoute>} />
       <Route path="/tg_session" element={<ProtectedRoute><TelegramSession /></ProtectedRoute>} />
       <Route path="/telegram-manage" element={<ProtectedRoute><TelegramManage /></ProtectedRoute>} />
+      <Route path="/telegram-replies" element={<ProtectedRoute><TelegramReplies /></ProtectedRoute>} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
