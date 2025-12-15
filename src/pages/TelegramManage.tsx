@@ -85,6 +85,17 @@ export default function TelegramManage() {
     details: { username: string; status: 'success' | 'failed'; error?: string }[];
   } | null>(null);
 
+  // Bulk Sender state (from usernames table)
+  const [bulkSenderOpen, setBulkSenderOpen] = useState(false);
+  const [bulkSenderMessage, setBulkSenderMessage] = useState('');
+  const [bulkSenderSending, setBulkSenderSending] = useState(false);
+  const [bulkSenderProgress, setBulkSenderProgress] = useState(0);
+  const [bulkSenderReport, setBulkSenderReport] = useState<{
+    success: number;
+    failed: number;
+    total: number;
+  } | null>(null);
+
   // Single message state (per session)
   const [singleMessageOpen, setSingleMessageOpen] = useState(false);
   const [singleSession, setSingleSession] = useState<TelegramSession | null>(null);
@@ -592,6 +603,146 @@ export default function TelegramManage() {
     toast.success('CSV exported');
   };
 
+  // Bulk Sender - sends from selected sessions to available usernames (1 session = 1 unique username)
+  const handleBulkSender = async () => {
+    if (selectedSessions.size === 0) {
+      toast.error('Select at least one session');
+      return;
+    }
+    if (!bulkSenderMessage.trim()) {
+      toast.error('Enter message content');
+      return;
+    }
+
+    setBulkSenderSending(true);
+    setBulkSenderProgress(0);
+    setBulkSenderReport(null);
+
+    // Get selected active sessions
+    const selectedSessionsArray = sessions.filter(s => 
+      selectedSessions.has(s.id) && s.status === 'active'
+    );
+
+    if (selectedSessionsArray.length === 0) {
+      toast.error('No active sessions selected');
+      setBulkSenderSending(false);
+      return;
+    }
+
+    // Fetch available usernames from database (all, not just 1000)
+    let availableUsernames: { id: string; username: string }[] = [];
+    let from = 0;
+    const pageSize = 1000;
+    let hasMore = true;
+    
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from('telegram_usernames')
+        .select('id, username')
+        .eq('user_id', user?.id)
+        .eq('status', 'available')
+        .range(from, from + pageSize - 1);
+
+      if (error || !data || data.length === 0) {
+        hasMore = false;
+      } else {
+        availableUsernames = [...availableUsernames, ...data];
+        from += pageSize;
+        hasMore = data.length === pageSize;
+      }
+    }
+
+    if (availableUsernames.length === 0) {
+      toast.error('No available usernames');
+      setBulkSenderSending(false);
+      return;
+    }
+
+    // Each session gets 1 unique username
+    const totalToSend = Math.min(selectedSessionsArray.length, availableUsernames.length);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < totalToSend; i++) {
+      const session = selectedSessionsArray[i];
+      const usernameData = availableUsernames[i];
+
+      try {
+        const data = await callVpsProxy('/send-message', {
+          session_data: session.session_data,
+          destination: usernameData.username,
+          message: bulkSenderMessage.trim(),
+          proxy: session.proxy_host ? {
+            host: session.proxy_host,
+            port: session.proxy_port,
+            username: session.proxy_username,
+            password: session.proxy_password,
+          } : null,
+        });
+
+        if (data && (data as any).error) {
+          // Mark as problem
+          await supabase
+            .from('telegram_usernames')
+            .update({ status: 'problem', error_message: (data as any).error, updated_at: new Date().toISOString() })
+            .eq('id', usernameData.id);
+          failCount++;
+        } else {
+          // Mark as used
+          await supabase
+            .from('telegram_usernames')
+            .update({ 
+              status: 'used', 
+              last_session_id: session.id, 
+              sent_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', usernameData.id);
+
+          // Update session stats
+          await supabase
+            .from('telegram_sessions')
+            .update({
+              messages_sent: (session.messages_sent || 0) + 1,
+              last_used_at: new Date().toISOString(),
+            })
+            .eq('id', session.id);
+
+          // Log message
+          if (user) {
+            await supabase.from('telegram_messages').insert({
+              user_id: user.id,
+              session_id: session.id,
+              destination: usernameData.username,
+              message_content: bulkSenderMessage.trim(),
+              status: 'sent',
+              sent_at: new Date().toISOString(),
+            });
+          }
+          successCount++;
+        }
+      } catch (error: any) {
+        await supabase
+          .from('telegram_usernames')
+          .update({ status: 'problem', error_message: error.message || 'Network error', updated_at: new Date().toISOString() })
+          .eq('id', usernameData.id);
+        failCount++;
+      }
+
+      setBulkSenderProgress(((i + 1) / totalToSend) * 100);
+    }
+
+    setBulkSenderReport({
+      success: successCount,
+      failed: failCount,
+      total: totalToSend,
+    });
+
+    setBulkSenderSending(false);
+    fetchSessions();
+    toast.success(`Bulk send complete: ${successCount} success, ${failCount} failed`);
+  };
+
   // Filter sessions
   const filteredSessions = sessions.filter(session => {
     if (!searchQuery) return true;
@@ -708,6 +859,10 @@ export default function TelegramManage() {
               <Button onClick={handleExportCSV} variant="outline" className="gap-2">
                 <Download className="h-4 w-4" />
                 Export
+              </Button>
+              <Button onClick={() => setBulkSenderOpen(true)} className="gap-2 bg-purple-600 hover:bg-purple-700">
+                <Users className="h-4 w-4" />
+                Bulk Sender
               </Button>
               <Button onClick={() => setDeleteConfirmOpen(true)} variant="destructive" className="gap-2">
                 <Trash2 className="h-4 w-4" />
@@ -992,6 +1147,72 @@ export default function TelegramManage() {
               <Button onClick={handleBulkMessage} disabled={sending} className="gap-2">
                 {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 Send Messages
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Sender Dialog - send from selected sessions to available usernames */}
+      <Dialog open={bulkSenderOpen} onOpenChange={setBulkSenderOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Bulk Sender
+            </DialogTitle>
+            <DialogDescription>
+              Send messages from {selectedSessions.size} selected session(s) to available usernames. 
+              Each session sends to 1 unique username.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <div className="p-3 bg-muted rounded-lg text-sm">
+              <p><strong>Selected Sessions:</strong> {selectedSessions.size}</p>
+              <p className="text-muted-foreground text-xs mt-1">
+                Each session will message 1 unique username from your available usernames list.
+              </p>
+            </div>
+            
+            <div>
+              <Label>Message Content</Label>
+              <Textarea
+                placeholder="Your message here..."
+                value={bulkSenderMessage}
+                onChange={(e) => setBulkSenderMessage(e.target.value)}
+                rows={4}
+                disabled={bulkSenderSending}
+              />
+            </div>
+
+            {bulkSenderSending && (
+              <div className="space-y-2">
+                <Progress value={bulkSenderProgress} />
+                <p className="text-sm text-center text-muted-foreground">
+                  Sending... {Math.round(bulkSenderProgress)}%
+                </p>
+              </div>
+            )}
+
+            {bulkSenderReport && (
+              <div className="p-4 bg-muted rounded-lg space-y-2">
+                <p className="font-medium">Send Report</p>
+                <div className="grid grid-cols-3 gap-2 text-sm">
+                  <div className="text-green-500">✓ Success: {bulkSenderReport.success}</div>
+                  <div className="text-red-500">✗ Failed: {bulkSenderReport.failed}</div>
+                  <div>Total: {bulkSenderReport.total}</div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setBulkSenderOpen(false)} disabled={bulkSenderSending}>
+                Cancel
+              </Button>
+              <Button onClick={handleBulkSender} disabled={bulkSenderSending} className="gap-2 bg-purple-600 hover:bg-purple-700">
+                {bulkSenderSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                Start Bulk Send
               </Button>
             </div>
           </div>
