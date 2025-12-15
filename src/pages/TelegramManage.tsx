@@ -17,6 +17,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTelegramConfig } from '@/hooks/useTelegramConfig';
 import { PhoneVerification } from '@/components/telegram/PhoneVerification';
 import { SessionUpload } from '@/components/telegram/SessionUpload';
+import { ProxyManagement } from '@/components/telegram/ProxyManagement';
 import { 
   Plus, 
   RefreshCw, 
@@ -27,7 +28,8 @@ import {
   Pencil,
   MessageSquare,
   AlertCircle,
-  Mail
+  Mail,
+  Globe
 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 
@@ -63,6 +65,7 @@ export default function TelegramManage() {
   const [sessions, setSessions] = useState<TelegramSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [addSessionOpen, setAddSessionOpen] = useState(false);
+  const [addProxyOpen, setAddProxyOpen] = useState(false);
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -635,6 +638,10 @@ export default function TelegramManage() {
             <p className="text-muted-foreground">Manage sessions, send messages, track replies</p>
           </div>
           <div className="flex gap-2">
+            <Button onClick={() => setAddProxyOpen(true)} variant="outline" className="gap-2">
+              <Globe className="h-4 w-4" />
+              Add Proxy
+            </Button>
             <Button onClick={() => setAddSessionOpen(true)} className="gap-2">
               <Plus className="h-4 w-4" />
               Add Session
@@ -1158,6 +1165,12 @@ export default function TelegramManage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Proxy Management Dialog */}
+      <ProxyManagement 
+        open={addProxyOpen} 
+        onOpenChange={setAddProxyOpen} 
+      />
     </DashboardLayout>
   );
 }

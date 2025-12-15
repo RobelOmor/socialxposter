@@ -351,6 +351,53 @@ export type Database = {
           },
         ]
       }
+      telegram_proxies: {
+        Row: {
+          created_at: string
+          id: string
+          proxy_host: string
+          proxy_password: string | null
+          proxy_port: number
+          proxy_username: string | null
+          status: string | null
+          updated_at: string
+          used_by_session_id: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          proxy_host: string
+          proxy_password?: string | null
+          proxy_port: number
+          proxy_username?: string | null
+          status?: string | null
+          updated_at?: string
+          used_by_session_id?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          proxy_host?: string
+          proxy_password?: string | null
+          proxy_port?: number
+          proxy_username?: string | null
+          status?: string | null
+          updated_at?: string
+          used_by_session_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "telegram_proxies_used_by_session_id_fkey"
+            columns: ["used_by_session_id"]
+            isOneToOne: false
+            referencedRelation: "telegram_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       telegram_replies: {
         Row: {
           created_at: string
