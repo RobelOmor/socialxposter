@@ -18,7 +18,8 @@ import {
   Loader2,
   Send,
   Eye,
-  MessageCircle
+  MessageCircle,
+  Download
 } from 'lucide-react';
 
 interface TelegramSession {
@@ -33,6 +34,7 @@ interface TelegramSession {
   proxy_username: string | null;
   proxy_password: string | null;
   messages_sent: number | null;
+  replies_received: number | null;
 }
 
 interface ReplyGroupData {
@@ -64,6 +66,7 @@ export default function TelegramReplies() {
   const [selectedReplyGroup, setSelectedReplyGroup] = useState<ReplyGroupData | null>(null);
   const [conversationReplyContent, setConversationReplyContent] = useState('');
   const [sendingReply, setSendingReply] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -152,6 +155,81 @@ export default function TelegramReplies() {
     });
     if (error) throw error;
     return data;
+  };
+
+  const syncRepliesFromVPS = async () => {
+    if (!user || sessions.length === 0) {
+      toast.error('No sessions available to sync');
+      return;
+    }
+
+    setSyncing(true);
+    let totalSynced = 0;
+    let failedSessions = 0;
+
+    try {
+      for (const session of sessions) {
+        if (session.status !== 'active') continue;
+        
+        try {
+          const data = await callVpsProxy('/get-unread', {
+            session_data: session.session_data,
+            proxy_host: session.proxy_host,
+            proxy_port: session.proxy_port,
+            proxy_username: session.proxy_username,
+            proxy_password: session.proxy_password,
+          });
+
+          if (data?.success && data?.messages && Array.isArray(data.messages)) {
+            for (const msg of data.messages) {
+              // Insert into telegram_replies with user_id for isolation
+              const { error: insertError } = await supabase
+                .from('telegram_replies')
+                .upsert({
+                  user_id: user.id,
+                  session_id: session.id,
+                  from_user: msg.from_user_name || msg.from_user_id?.toString() || 'Unknown',
+                  from_user_id: msg.from_user_id?.toString() || null,
+                  message_content: msg.text || '',
+                  replied: false,
+                  created_at: msg.date ? new Date(msg.date).toISOString() : new Date().toISOString(),
+                }, {
+                  onConflict: 'id',
+                  ignoreDuplicates: false,
+                });
+
+              if (!insertError) {
+                totalSynced++;
+              }
+            }
+
+            // Update session replies_received count
+            await supabase
+              .from('telegram_sessions')
+              .update({ 
+                replies_received: (session.replies_received || 0) + (data.messages?.length || 0)
+              })
+              .eq('id', session.id);
+          }
+        } catch (err) {
+          console.error(`Failed to sync session ${session.phone_number}:`, err);
+          failedSessions++;
+        }
+      }
+
+      if (totalSynced > 0) {
+        toast.success(`Synced ${totalSynced} new replies from ${sessions.filter(s => s.status === 'active').length - failedSessions} sessions`);
+      } else {
+        toast.info('No new replies to sync');
+      }
+      
+      fetchReplyGroups();
+    } catch (error) {
+      console.error('Sync error:', error);
+      toast.error('Failed to sync replies');
+    } finally {
+      setSyncing(false);
+    }
   };
 
   const openConversation = (group: ReplyGroupData) => {
@@ -259,10 +337,16 @@ export default function TelegramReplies() {
               <MessageCircle className="h-5 w-5" />
               All Replies
             </CardTitle>
-            <Button variant="outline" size="sm" onClick={fetchReplyGroups} disabled={loading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="default" size="sm" onClick={syncRepliesFromVPS} disabled={syncing || sessions.length === 0}>
+                <Download className={`h-4 w-4 mr-2 ${syncing ? 'animate-bounce' : ''}`} />
+                {syncing ? 'Syncing...' : 'Sync Replies'}
+              </Button>
+              <Button variant="outline" size="sm" onClick={fetchReplyGroups} disabled={loading}>
+                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             {loading ? (
