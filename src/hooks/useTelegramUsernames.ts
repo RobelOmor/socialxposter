@@ -28,22 +28,44 @@ export const useTelegramUsernames = () => {
   const fetchUsernames = useCallback(async () => {
     if (!user) return;
     setLoading(true);
-    const { data, error } = await supabase
-      .from("telegram_usernames")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
+    
+    // Fetch all usernames without 1000 row limit using pagination
+    let allData: TelegramUsername[] = [];
+    let from = 0;
+    const pageSize = 1000;
+    let hasMore = true;
+    
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from("telegram_usernames")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .range(from, from + pageSize - 1);
 
-    if (!error && data) {
-      setUsernames(data as TelegramUsername[]);
+      if (error) {
+        console.error("Error fetching usernames:", error);
+        break;
+      }
       
-      // Calculate stats
-      const total = data.length;
-      const available = data.filter(u => u.status === "available").length;
-      const used = data.filter(u => u.status === "used").length;
-      const problem = data.filter(u => u.status === "problem").length;
-      setStats({ total, available, used, problem });
+      if (data && data.length > 0) {
+        allData = [...allData, ...(data as TelegramUsername[])];
+        from += pageSize;
+        hasMore = data.length === pageSize;
+      } else {
+        hasMore = false;
+      }
     }
+
+    setUsernames(allData);
+    
+    // Calculate stats
+    const total = allData.length;
+    const available = allData.filter(u => u.status === "available").length;
+    const used = allData.filter(u => u.status === "used").length;
+    const problem = allData.filter(u => u.status === "problem").length;
+    setStats({ total, available, used, problem });
+    
     setLoading(false);
   }, [user]);
 
