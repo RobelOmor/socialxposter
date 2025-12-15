@@ -1,6 +1,7 @@
 import { ReactNode, useState } from 'react';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
+import { MobileBottomNav } from './MobileBottomNav';
 import { cn } from '@/lib/utils';
 
 interface DashboardLayoutProps {
@@ -24,13 +25,16 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       <Header onMenuClick={() => setSidebarOpen(true)} />
       
       <main className={cn(
-        "pt-16 transition-all duration-300",
+        "pt-16 pb-20 lg:pb-6 transition-all duration-300",
         "lg:ml-64" // Only add margin on large screens
       )}>
-        <div className="p-4 md:p-6">
+        <div className="p-3 sm:p-4 md:p-6">
           {children}
         </div>
       </main>
+      
+      {/* Mobile bottom navigation */}
+      <MobileBottomNav />
     </div>
   );
 }

@@ -17,6 +17,8 @@ import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { BulkImportDialog } from '@/components/instagram/BulkImportDialog';
+import { MobileAccountCard } from '@/components/instagram/MobileAccountCard';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { 
   Plus, 
   RefreshCw, 
@@ -78,6 +80,7 @@ const isToday = (dateString: string | null): boolean => {
 
 export default function InstagramManage() {
   const { user, profile } = useAuth();
+  const isMobile = useIsMobile();
   const [accounts, setAccounts] = useState<InstagramAccount[]>([]);
   const [batches, setBatches] = useState<AccountBatch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -819,15 +822,15 @@ export default function InstagramManage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-              <Instagram className="h-7 w-7 text-pink-500" />
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground flex items-center gap-2">
+              <Instagram className="h-5 w-5 sm:h-7 sm:w-7 text-pink-500" />
               Instagram Manage
             </h1>
-            <p className="text-muted-foreground mt-1">
+            <p className="text-sm text-muted-foreground mt-1">
               Manage your connected Instagram accounts
             </p>
           </div>
