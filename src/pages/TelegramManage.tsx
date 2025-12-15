@@ -101,6 +101,8 @@ export default function TelegramManage() {
     failed: number;
     total: number;
   } | null>(null);
+  const [bulkSenderFailLogs, setBulkSenderFailLogs] = useState<{username: string; error: string}[]>([]);
+  const [showFailLogsDialog, setShowFailLogsDialog] = useState(false);
 
   // Single message state (per session)
   const [singleMessageOpen, setSingleMessageOpen] = useState(false);
@@ -665,6 +667,7 @@ export default function TelegramManage() {
     setBulkSenderSending(true);
     setBulkSenderProgress(0);
     setBulkSenderReport(null);
+    setBulkSenderFailLogs([]);
 
     // Refresh daily counts first
     await fetchDailyMessageCounts();
@@ -714,6 +717,7 @@ export default function TelegramManage() {
     let successCount = 0;
     let failCount = 0;
     let skippedCount = 0;
+    const failLogs: {username: string; error: string}[] = [];
     
     // Track daily counts locally during bulk send
     const localDailyCounts = { ...dailyMessageCounts };
@@ -745,9 +749,11 @@ export default function TelegramManage() {
 
         if (data && (data as any).error) {
           // Mark as problem
+          const errorMsg = (data as any).error;
+          failLogs.push({ username: usernameData.username, error: errorMsg });
           await supabase
             .from('telegram_usernames')
-            .update({ status: 'problem', error_message: (data as any).error, updated_at: new Date().toISOString() })
+            .update({ status: 'problem', error_message: errorMsg, updated_at: new Date().toISOString() })
             .eq('id', usernameData.id);
           failCount++;
         } else {
@@ -788,9 +794,11 @@ export default function TelegramManage() {
           successCount++;
         }
       } catch (error: any) {
+        const errorMsg = error.message || 'Network error';
+        failLogs.push({ username: usernameData.username, error: errorMsg });
         await supabase
           .from('telegram_usernames')
-          .update({ status: 'problem', error_message: error.message || 'Network error', updated_at: new Date().toISOString() })
+          .update({ status: 'problem', error_message: errorMsg, updated_at: new Date().toISOString() })
           .eq('id', usernameData.id);
         failCount++;
       }
@@ -803,6 +811,7 @@ export default function TelegramManage() {
       failed: failCount,
       total: totalToSend,
     });
+    setBulkSenderFailLogs(failLogs);
 
     setBulkSenderSending(false);
     fetchSessions();
@@ -1347,6 +1356,12 @@ export default function TelegramManage() {
             )}
 
             <div className="flex gap-2 justify-end">
+              {bulkSenderFailLogs.length > 0 && (
+                <Button variant="outline" onClick={() => setShowFailLogsDialog(true)} className="gap-2">
+                  <AlertCircle className="h-4 w-4" />
+                  Logs ({bulkSenderFailLogs.length})
+                </Button>
+              )}
               <Button variant="outline" onClick={() => setBulkSenderOpen(false)} disabled={bulkSenderSending}>
                 Cancel
               </Button>
@@ -1355,6 +1370,36 @@ export default function TelegramManage() {
                 Start Bulk Send
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Fail Logs Dialog */}
+      <Dialog open={showFailLogsDialog} onOpenChange={setShowFailLogsDialog}>
+        <DialogContent className="sm:max-w-lg max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-500">
+              <AlertCircle className="h-5 w-5" />
+              Failed Messages Logs ({bulkSenderFailLogs.length})
+            </DialogTitle>
+            <DialogDescription>
+              Original error responses from failed message sends
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[50vh]">
+            <div className="space-y-2">
+              {bulkSenderFailLogs.map((log, index) => (
+                <div key={index} className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-sm">
+                  <div className="font-medium text-red-400">@{log.username}</div>
+                  <div className="text-muted-foreground mt-1 break-all">{log.error}</div>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={() => setShowFailLogsDialog(false)}>
+              Close
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
