@@ -56,13 +56,15 @@ serve(async (req) => {
     const vpsUrl = `${vpsBaseUrl}${endpoint}`;
     console.log(`Forwarding to VPS: ${vpsUrl}`);
 
-    // Forward request to VPS
+    // Use GET for health check, POST for other endpoints
+    const isHealthCheck = endpoint === "/" || endpoint === "/health";
+    
     const response = await fetch(vpsUrl, {
-      method: 'POST',
-      headers: {
+      method: isHealthCheck ? 'GET' : 'POST',
+      headers: isHealthCheck ? {} : {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(params),
+      body: isHealthCheck ? undefined : JSON.stringify(params),
     });
 
     const data = await response.json();
