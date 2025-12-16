@@ -116,19 +116,21 @@ serve(async (req) => {
 
     console.log('Validating Instagram session for user:', dsUserId);
 
-    // Call Instagram API directly to validate session
+    const commonHeaders = {
+      'Cookie': cookieString,
+      'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229237)',
+      'X-IG-App-ID': '936619743392459',
+      'X-CSRFToken': csrfToken,
+      'Accept': '*/*',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'X-IG-Device-ID': crypto.randomUUID(),
+      'X-IG-Android-ID': 'android-' + crypto.randomUUID().replace(/-/g, '').substring(0, 16),
+    };
+
+    // Step 1: Validate session with current_user endpoint
     const igResponse = await fetch('https://i.instagram.com/api/v1/accounts/current_user/?edit=true', {
       method: 'GET',
-      headers: {
-        'Cookie': cookieString,
-        'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229237)',
-        'X-IG-App-ID': '936619743392459',
-        'X-CSRFToken': csrfToken,
-        'Accept': '*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'X-IG-Device-ID': crypto.randomUUID(),
-        'X-IG-Android-ID': 'android-' + crypto.randomUUID().replace(/-/g, '').substring(0, 16),
-      },
+      headers: commonHeaders,
     });
 
     const igResult = await igResponse.json();
@@ -183,8 +185,41 @@ serve(async (req) => {
 
     const igUser = igResult.user;
     const username = igUser?.username || `user_${dsUserId}`;
+    const userId = igUser?.pk || dsUserId;
 
     console.log('Instagram user found:', username);
+
+    // Step 2: Fetch user stats from /users/{user_id}/info/ endpoint
+    let postsCount = 0;
+    let followersCount = 0;
+    let followingCount = 0;
+
+    if (userId) {
+      console.log('Fetching user stats for user_id:', userId);
+      try {
+        const statsResponse = await fetch(`https://i.instagram.com/api/v1/users/${userId}/info/`, {
+          method: 'GET',
+          headers: commonHeaders,
+        });
+
+        if (statsResponse.ok) {
+          const statsResult = await statsResponse.json();
+          console.log('User stats response:', JSON.stringify(statsResult).substring(0, 500));
+
+          if (statsResult?.user) {
+            const statsUser = statsResult.user;
+            postsCount = statsUser?.media_count ?? 0;
+            followersCount = statsUser?.follower_count ?? 0;
+            followingCount = statsUser?.following_count ?? 0;
+            console.log(`Stats: posts=${postsCount}, followers=${followersCount}, following=${followingCount}`);
+          }
+        } else {
+          console.log('Stats fetch failed with status:', statsResponse.status);
+        }
+      } catch (statsError) {
+        console.error('Error fetching stats:', statsError);
+      }
+    }
 
     // Check if account already exists
     const { data: existingAccount } = await supabaseClient
@@ -215,9 +250,9 @@ serve(async (req) => {
         username: username,
         full_name: igUser?.full_name || '',
         profile_pic_url: igUser?.profile_pic_url || null,
-        posts_count: igUser?.media_count ?? 0,
-        followers_count: igUser?.follower_count ?? 0,
-        following_count: igUser?.following_count ?? 0,
+        posts_count: postsCount,
+        followers_count: followersCount,
+        following_count: followingCount,
         bio: igUser?.biography ?? '',
         cookies: cookieString,
         status: 'active',
@@ -256,6 +291,9 @@ serve(async (req) => {
         data: {
           username: username,
           full_name: igUser?.full_name || '',
+          posts_count: postsCount,
+          followers_count: followersCount,
+          following_count: followingCount,
         }
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

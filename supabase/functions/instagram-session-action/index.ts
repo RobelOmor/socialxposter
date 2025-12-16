@@ -67,27 +67,28 @@ serve(async (req) => {
     }
 
     const csrfToken = cookieObj['csrftoken'] || '';
+    const dsUserId = cookieObj['ds_user_id'] || '';
 
-    // Call Instagram API directly to validate/refresh session
-    console.log('Calling Instagram API directly for session validation');
+    const commonHeaders = {
+      'Cookie': cookieString,
+      'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229237)',
+      'X-IG-App-ID': '936619743392459',
+      'X-CSRFToken': csrfToken,
+      'Accept': '*/*',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'X-IG-Device-ID': crypto.randomUUID(),
+      'X-IG-Android-ID': 'android-' + crypto.randomUUID().replace(/-/g, '').substring(0, 16),
+    };
 
+    // Step 1: Validate session with current_user endpoint
+    console.log('Calling Instagram API for session validation');
     const igResponse = await fetch('https://i.instagram.com/api/v1/accounts/current_user/?edit=true', {
       method: 'GET',
-      headers: {
-        'Cookie': cookieString,
-        'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229237)',
-        'X-IG-App-ID': '936619743392459',
-        'X-CSRFToken': csrfToken,
-        'Accept': '*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'X-IG-Device-ID': crypto.randomUUID(),
-        'X-IG-Android-ID': 'android-' + crypto.randomUUID().replace(/-/g, '').substring(0, 16),
-      },
+      headers: commonHeaders,
     });
 
     const igResult = await igResponse.json();
-    console.log('Instagram API Response status:', igResponse.status);
-    console.log('Instagram API Response:', JSON.stringify(igResult).substring(0, 500));
+    console.log('Session validation response status:', igResponse.status);
 
     let newStatus: 'active' | 'expired' | 'suspended' = 'expired';
     let updateData: any = {
@@ -104,17 +105,45 @@ serve(async (req) => {
 
     if (isValid) {
       const igUser = igResult.user;
+      const userId = igUser?.pk || dsUserId;
+      
       newStatus = 'active';
       updateData = {
         ...updateData,
         full_name: igUser?.full_name ?? '',
         profile_pic_url: igUser?.profile_pic_url ?? null,
-        posts_count: igUser?.media_count ?? 0,
-        followers_count: igUser?.follower_count ?? 0,
-        following_count: igUser?.following_count ?? 0,
         bio: igUser?.biography ?? '',
         status: 'active',
       };
+
+      // Step 2: Fetch user stats from /users/{user_id}/info/ endpoint
+      if (userId) {
+        console.log('Fetching user stats for user_id:', userId);
+        try {
+          const statsResponse = await fetch(`https://i.instagram.com/api/v1/users/${userId}/info/`, {
+            method: 'GET',
+            headers: commonHeaders,
+          });
+
+          if (statsResponse.ok) {
+            const statsResult = await statsResponse.json();
+            console.log('User stats response:', JSON.stringify(statsResult).substring(0, 500));
+
+            if (statsResult?.user) {
+              const statsUser = statsResult.user;
+              updateData.posts_count = statsUser?.media_count ?? 0;
+              updateData.followers_count = statsUser?.follower_count ?? 0;
+              updateData.following_count = statsUser?.following_count ?? 0;
+              console.log(`Stats: posts=${updateData.posts_count}, followers=${updateData.followers_count}, following=${updateData.following_count}`);
+            }
+          } else {
+            console.log('Stats fetch failed with status:', statsResponse.status);
+          }
+        } catch (statsError) {
+          console.error('Error fetching stats:', statsError);
+        }
+      }
+
       console.log('Session is ACTIVE');
     } else if (isSuspended) {
       console.log('=== SUSPEND DETECTED ===');
