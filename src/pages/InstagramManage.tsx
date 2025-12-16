@@ -546,8 +546,10 @@ export default function InstagramManage() {
       toast.warning(`${successCount} assigned, ${failCount} failed`, { id: 'bulk-proxy' });
     }
 
-    fetchAccountProxies();
+    // Refresh all data to update Daily/Proxy column
+    await fetchAccountProxies();
     refetchProxies();
+    await fetchAccounts();
     setSelectedAccounts(new Set());
   };
 
