@@ -1,11 +1,22 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
+import { ProxyAgent, fetch as undiciFetch } from "https://esm.sh/undici@6.6.2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// Create proxied fetch function
+async function proxiedFetch(url: string, options: any, proxyUrl: string): Promise<any> {
+  const dispatcher = new ProxyAgent(proxyUrl);
+  const response = await undiciFetch(url, {
+    ...options,
+    dispatcher,
+  });
+  return response;
+}
 
 // Auto-retry configuration
 const MAX_RETRIES = 3;
@@ -107,11 +118,17 @@ serve(async (req) => {
   }
 
   try {
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
-    );
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const proxy711Password = Deno.env.get('PROXY_711_PASSWORD') ?? '';
+
+    const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: req.headers.get('Authorization')! } }
+    });
+
+    // Service client to read admin config
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
     if (authError || !user) {
@@ -137,6 +154,24 @@ serve(async (req) => {
       );
     }
 
+    // Get 711proxy config from admin settings
+    const { data: adminConfig } = await supabaseAdmin
+      .from('telegram_admin_config')
+      .select('proxy_711_host, proxy_711_port, proxy_711_username')
+      .limit(1)
+      .single();
+
+    // Build proxy URL
+    let proxyUrl = '';
+    const useProxy = adminConfig?.proxy_711_host && adminConfig?.proxy_711_username && proxy711Password;
+    
+    if (useProxy) {
+      proxyUrl = `http://${adminConfig.proxy_711_username}:${proxy711Password}@${adminConfig.proxy_711_host}:${adminConfig.proxy_711_port || 10000}`;
+      console.log('Using 711proxy:', adminConfig.proxy_711_host);
+    } else {
+      console.warn('711proxy not configured, using direct connection (may be blocked by Instagram)');
+    }
+
     // Get account with safety tracking fields
     const { data: account, error: accountError } = await supabaseClient
       .from('instagram_accounts')
@@ -159,7 +194,7 @@ serve(async (req) => {
       );
     }
 
-    // Check if account has a proxy assigned
+    // Check if account has a proxy assigned (legacy check)
     const { data: proxy, error: proxyError } = await supabaseClient
       .from('instagram_proxies')
       .select('id, proxy_host, proxy_port')
@@ -173,7 +208,7 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Posting to account:`, account.username, 'using proxy:', proxy.proxy_host);
+    console.log(`Posting to account:`, account.username, 'via 711proxy:', adminConfig?.proxy_711_host);
 
     // Safety checks (unless skipped for admin/testing)
     if (!skipLimits) {
@@ -252,7 +287,7 @@ serve(async (req) => {
       }
       
       console.log('Downloading image from URL:', finalUrl);
-      // Download with browser-like headers requesting JPEG specifically
+      // Download with browser-like headers requesting JPEG specifically (using regular fetch, not proxied)
       const imageResponse = await fetch(finalUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -319,8 +354,8 @@ serve(async (req) => {
     const uploadId = Date.now().toString();
     const uploadName = `${uploadId}_0_${Math.floor(Math.random() * 9000000000) + 1000000000}`;
 
-    // Step 1: Upload image to Instagram with actual dimensions
-    console.log('Step 1: Uploading image to Instagram...');
+    // Step 1: Upload image to Instagram with actual dimensions using 711proxy
+    console.log('Step 1: Uploading image to Instagram via 711proxy...');
     
     const uploadHeaders = {
       'Cookie': cookieString,
@@ -340,15 +375,30 @@ serve(async (req) => {
       'Offset': '0',
     };
 
-    // Upload with retry
+    // Upload with retry using proxied fetch
     const uploadResult = await withRetry(
       async () => {
-        const uploadResponse = await fetch(`https://i.instagram.com/rupload_igphoto/${uploadName}`, {
-          method: 'POST',
-          headers: uploadHeaders,
-          body: imageBytes.buffer as ArrayBuffer,
-        });
-        return await uploadResponse.json();
+        let uploadResponse: any;
+        if (useProxy) {
+          uploadResponse = await proxiedFetch(`https://i.instagram.com/rupload_igphoto/${uploadName}`, {
+            method: 'POST',
+            headers: uploadHeaders,
+            body: imageBytes.buffer,
+          }, proxyUrl);
+        } else {
+          uploadResponse = await fetch(`https://i.instagram.com/rupload_igphoto/${uploadName}`, {
+            method: 'POST',
+            headers: uploadHeaders,
+            body: imageBytes.buffer as ArrayBuffer,
+          });
+        }
+        const responseText = await uploadResponse.text();
+        try {
+          return JSON.parse(responseText);
+        } catch {
+          console.error('Failed to parse upload response:', responseText.substring(0, 500));
+          throw new Error('Invalid response from Instagram: ' + responseText.substring(0, 200));
+        }
       },
       isRetryableError,
       'Instagram Upload'
@@ -379,8 +429,8 @@ serve(async (req) => {
       );
     }
 
-    // Step 2: Configure/publish the photo with crop settings
-    console.log('Step 2: Configuring/publishing photo...');
+    // Step 2: Configure/publish the photo with crop settings using 711proxy
+    console.log('Step 2: Configuring/publishing photo via 711proxy...');
 
     const configureData = {
       'upload_id': uploadId,
@@ -405,21 +455,42 @@ serve(async (req) => {
 
     console.log('Configure data:', JSON.stringify(configureData));
 
-    // Configure with retry
+    // Configure with retry using proxied fetch
     const configureResult = await withRetry(
       async () => {
-        const configureResponse = await fetch('https://i.instagram.com/api/v1/media/configure/', {
-          method: 'POST',
-          headers: {
-            'Cookie': cookieString,
-            'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229237)',
-            'X-IG-App-ID': '936619743392459',
-            'X-CSRFToken': csrfToken,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: `signed_body=SIGNATURE.${encodeURIComponent(JSON.stringify(configureData))}`,
-        });
-        return await configureResponse.json();
+        let configureResponse: any;
+        if (useProxy) {
+          configureResponse = await proxiedFetch('https://i.instagram.com/api/v1/media/configure/', {
+            method: 'POST',
+            headers: {
+              'Cookie': cookieString,
+              'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229237)',
+              'X-IG-App-ID': '936619743392459',
+              'X-CSRFToken': csrfToken,
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `signed_body=SIGNATURE.${encodeURIComponent(JSON.stringify(configureData))}`,
+          }, proxyUrl);
+        } else {
+          configureResponse = await fetch('https://i.instagram.com/api/v1/media/configure/', {
+            method: 'POST',
+            headers: {
+              'Cookie': cookieString,
+              'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229237)',
+              'X-IG-App-ID': '936619743392459',
+              'X-CSRFToken': csrfToken,
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `signed_body=SIGNATURE.${encodeURIComponent(JSON.stringify(configureData))}`,
+          });
+        }
+        const responseText = await configureResponse.text();
+        try {
+          return JSON.parse(responseText);
+        } catch {
+          console.error('Failed to parse configure response:', responseText.substring(0, 500));
+          throw new Error('Invalid response from Instagram: ' + responseText.substring(0, 200));
+        }
       },
       isRetryableError,
       'Instagram Configure'
@@ -452,7 +523,8 @@ serve(async (req) => {
           success: true, 
           mediaId: configureResult.media.id,
           posts_today: newPostsToday,
-          daily_limit: DAILY_POST_LIMIT
+          daily_limit: DAILY_POST_LIMIT,
+          proxy_used: adminConfig?.proxy_711_host || 'none'
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );

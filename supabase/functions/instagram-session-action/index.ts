@@ -1,10 +1,21 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { ProxyAgent, fetch as undiciFetch } from "https://esm.sh/undici@6.6.2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// Create proxied fetch function
+async function proxiedFetch(url: string, options: any, proxyUrl: string): Promise<any> {
+  const dispatcher = new ProxyAgent(proxyUrl);
+  const response = await undiciFetch(url, {
+    ...options,
+    dispatcher,
+  });
+  return response;
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -14,10 +25,15 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const proxy711Password = Deno.env.get('PROXY_711_PASSWORD') ?? '';
 
     const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: req.headers.get('Authorization')! } }
     });
+
+    // Service client to read admin config
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
     if (authError || !user) {
@@ -36,6 +52,24 @@ serve(async (req) => {
       );
     }
 
+    // Get 711proxy config from admin settings
+    const { data: adminConfig } = await supabaseAdmin
+      .from('telegram_admin_config')
+      .select('proxy_711_host, proxy_711_port, proxy_711_username')
+      .limit(1)
+      .single();
+
+    // Build proxy URL
+    let proxyUrl = '';
+    const useProxy = adminConfig?.proxy_711_host && adminConfig?.proxy_711_username && proxy711Password;
+    
+    if (useProxy) {
+      proxyUrl = `http://${adminConfig.proxy_711_username}:${proxy711Password}@${adminConfig.proxy_711_host}:${adminConfig.proxy_711_port || 10000}`;
+      console.log('Using 711proxy:', adminConfig.proxy_711_host);
+    } else {
+      console.warn('711proxy not configured, using direct connection (may be blocked by Instagram)');
+    }
+
     // Get account
     const { data: account, error: accountError } = await supabaseClient
       .from('instagram_accounts')
@@ -51,7 +85,7 @@ serve(async (req) => {
       );
     }
 
-    // Check if account has a proxy assigned
+    // Check if account has a proxy assigned (legacy check - now we use 711proxy)
     const { data: proxy, error: proxyError } = await supabaseClient
       .from('instagram_proxies')
       .select('id, proxy_host, proxy_port')
@@ -65,7 +99,7 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Performing ${action} on account:`, account.username, 'using proxy:', proxy.proxy_host);
+    console.log(`Performing ${action} on account:`, account.username, 'via 711proxy');
 
     // Parse cookies
     let cookieObj: Record<string, string> = {};
@@ -94,14 +128,34 @@ serve(async (req) => {
       'X-IG-Android-ID': 'android-' + crypto.randomUUID().replace(/-/g, '').substring(0, 16),
     };
 
-    // Step 1: Validate session with current_user endpoint
-    console.log('Calling Instagram API for session validation');
-    const igResponse = await fetch('https://i.instagram.com/api/v1/accounts/current_user/?edit=true', {
-      method: 'GET',
-      headers: commonHeaders,
-    });
+    // Step 1: Validate session with current_user endpoint using proxy
+    console.log('Calling Instagram API for session validation via 711proxy');
+    
+    let igResponse: any;
+    if (useProxy) {
+      igResponse = await proxiedFetch('https://i.instagram.com/api/v1/accounts/current_user/?edit=true', {
+        method: 'GET',
+        headers: commonHeaders,
+      }, proxyUrl);
+    } else {
+      igResponse = await fetch('https://i.instagram.com/api/v1/accounts/current_user/?edit=true', {
+        method: 'GET',
+        headers: commonHeaders,
+      });
+    }
 
-    const igResult = await igResponse.json();
+    const igResponseText = await igResponse.text();
+    let igResult: any;
+    try {
+      igResult = JSON.parse(igResponseText);
+    } catch (e) {
+      console.error('Failed to parse Instagram response:', igResponseText.substring(0, 500));
+      return new Response(
+        JSON.stringify({ success: false, error: 'Invalid response from Instagram' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
     console.log('Session validation response status:', igResponse.status);
 
     let newStatus: 'active' | 'expired' | 'suspended' = 'expired';
@@ -130,17 +184,26 @@ serve(async (req) => {
         status: 'active',
       };
 
-      // Step 2: Fetch user stats from /users/{user_id}/info/ endpoint
+      // Step 2: Fetch user stats from /users/{user_id}/info/ endpoint using proxy
       if (userId) {
         console.log('Fetching user stats for user_id:', userId);
         try {
-          const statsResponse = await fetch(`https://i.instagram.com/api/v1/users/${userId}/info/`, {
-            method: 'GET',
-            headers: commonHeaders,
-          });
+          let statsResponse: any;
+          if (useProxy) {
+            statsResponse = await proxiedFetch(`https://i.instagram.com/api/v1/users/${userId}/info/`, {
+              method: 'GET',
+              headers: commonHeaders,
+            }, proxyUrl);
+          } else {
+            statsResponse = await fetch(`https://i.instagram.com/api/v1/users/${userId}/info/`, {
+              method: 'GET',
+              headers: commonHeaders,
+            });
+          }
 
           if (statsResponse.ok) {
-            const statsResult = await statsResponse.json();
+            const statsText = await statsResponse.text();
+            const statsResult = JSON.parse(statsText);
             console.log('User stats response:', JSON.stringify(statsResult).substring(0, 500));
 
             if (statsResult?.user) {
@@ -187,7 +250,8 @@ serve(async (req) => {
         success: true, 
         status: newStatus,
         data: updateData,
-        instagram_response: igResult
+        instagram_response: igResult,
+        proxy_used: useProxy ? adminConfig?.proxy_711_host : 'none'
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
