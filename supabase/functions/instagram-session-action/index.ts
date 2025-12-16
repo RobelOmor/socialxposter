@@ -134,11 +134,14 @@ serve(async (req) => {
 
     // If VPS cannot use SOCKS proxy, do NOT mark account as expired.
     if (typeof vpsResult?.error === 'string' && vpsResult.error.toLowerCase().includes('missing dependencies for socks')) {
+      const socksProxyHint =
+        'VPS could not use the SOCKS proxy. If httpx[socks]/socksio is already installed, the proxy is likely not SOCKS5 or the credentials/IP allowlist are incorrect.';
+
       return new Response(
         JSON.stringify({
           success: false,
-          error: 'Instagram VPS-এ SOCKS support dependency নেই. VPS container এ `pip install "httpx[socks]"` (বা `socksio`) দিয়ে আবার restart/build করুন.',
-          reason: 'vps_proxy_dependency_missing',
+          error: `SOCKS proxy error: ${vpsResult.error}. ${socksProxyHint}`,
+          reason: 'vps_proxy_error',
           vps_response: vpsResult,
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
