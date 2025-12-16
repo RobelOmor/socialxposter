@@ -297,6 +297,7 @@ export type Database = {
           api_id: string | null
           created_at: string
           id: string
+          instagram_vps_ip: string | null
           is_active: boolean | null
           max_messages_per_day: number | null
           max_sessions_per_user: number | null
@@ -308,6 +309,7 @@ export type Database = {
           api_id?: string | null
           created_at?: string
           id?: string
+          instagram_vps_ip?: string | null
           is_active?: boolean | null
           max_messages_per_day?: number | null
           max_sessions_per_user?: number | null
@@ -319,6 +321,7 @@ export type Database = {
           api_id?: string | null
           created_at?: string
           id?: string
+          instagram_vps_ip?: string | null
           is_active?: boolean | null
           max_messages_per_day?: number | null
           max_sessions_per_user?: number | null
