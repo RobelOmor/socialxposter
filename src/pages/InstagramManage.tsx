@@ -485,6 +485,72 @@ export default function InstagramManage() {
     }
   };
 
+  // Bulk assign proxies to selected accounts that don't have one
+  const handleBulkAssignProxy = async () => {
+    if (selectedAccounts.size === 0 || !user) {
+      toast.error('Please select accounts first');
+      return;
+    }
+
+    // Filter accounts that don't have a proxy
+    const accountsNeedingProxy = Array.from(selectedAccounts).filter(id => !accountProxies.has(id));
+    
+    if (accountsNeedingProxy.length === 0) {
+      toast.info('All selected accounts already have proxies assigned');
+      return;
+    }
+
+    toast.loading(`Assigning proxies to ${accountsNeedingProxy.length} accounts...`, { id: 'bulk-proxy' });
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const accountId of accountsNeedingProxy) {
+      // Get an available proxy
+      const { data: availableProxy, error: proxyError } = await supabase
+        .from('instagram_proxies')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('status', 'available')
+        .is('used_by_account_id', null)
+        .limit(1)
+        .single();
+
+      if (proxyError || !availableProxy) {
+        failCount++;
+        continue;
+      }
+
+      // Assign proxy to account
+      const { error: updateError } = await supabase
+        .from('instagram_proxies')
+        .update({ 
+          status: 'used',
+          used_by_account_id: accountId,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', availableProxy.id);
+
+      if (updateError) {
+        failCount++;
+      } else {
+        successCount++;
+      }
+    }
+
+    if (failCount === 0) {
+      toast.success(`${successCount} proxies assigned successfully`, { id: 'bulk-proxy' });
+    } else if (successCount === 0) {
+      toast.error(`Failed to assign proxies. ${failCount} failed (no available proxies?)`, { id: 'bulk-proxy' });
+    } else {
+      toast.warning(`${successCount} assigned, ${failCount} failed`, { id: 'bulk-proxy' });
+    }
+
+    fetchAccountProxies();
+    refetchProxies();
+    setSelectedAccounts(new Set());
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -666,7 +732,7 @@ export default function InstagramManage() {
   };
 
   // Bulk refresh selected accounts
-  const handleBulkRefresh = async (skipProxy: boolean = false) => {
+  const handleBulkRefresh = async () => {
     if (selectedAccounts.size === 0) {
       toast.error('Please select accounts first');
       return;
@@ -674,36 +740,31 @@ export default function InstagramManage() {
 
     setBulkRefreshing(true);
     
-    // Filter accounts: only those with proxy assigned (unless skipping proxy)
-    let selectedArray = Array.from(selectedAccounts);
-    if (!skipProxy) {
-      const accountsWithProxy = selectedArray.filter(id => accountProxies.has(id));
-      const accountsWithoutProxy = selectedArray.length - accountsWithProxy.length;
-      
-      if (accountsWithProxy.length === 0) {
-        toast.error('No accounts with proxy assigned');
-        setBulkRefreshing(false);
-        return;
-      }
-      
-      if (accountsWithoutProxy > 0) {
-        toast.warning(`${accountsWithoutProxy} accounts skipped (no proxy)`);
-      }
-      
-      selectedArray = accountsWithProxy;
+    // Filter accounts: only those with proxy assigned
+    const selectedArray = Array.from(selectedAccounts);
+    const accountsWithProxy = selectedArray.filter(id => accountProxies.has(id));
+    const accountsWithoutProxy = selectedArray.length - accountsWithProxy.length;
+    
+    if (accountsWithProxy.length === 0) {
+      toast.error('No accounts with proxy assigned. Assign proxies first.');
+      setBulkRefreshing(false);
+      return;
+    }
+    
+    if (accountsWithoutProxy > 0) {
+      toast.warning(`${accountsWithoutProxy} accounts skipped (no proxy)`);
     }
     
     let successCount = 0;
     let failCount = 0;
     let suspendCount = 0;
 
-    const proxyMode = skipProxy ? 'WITHOUT proxy' : 'WITH proxy';
-    toast.loading(`Refreshing ${selectedArray.length} accounts (${proxyMode})...`, { id: 'bulk-refresh' });
+    toast.loading(`Refreshing ${accountsWithProxy.length} accounts...`, { id: 'bulk-refresh' });
 
-    for (const accountId of selectedArray) {
+    for (const accountId of accountsWithProxy) {
       try {
         const { data, error } = await supabase.functions.invoke('instagram-session-action', {
-          body: { accountId, action: 'refresh', skipProxy }
+          body: { accountId, action: 'refresh' }
         });
 
         if (error || !data.success) {
@@ -726,9 +787,9 @@ export default function InstagramManage() {
     if (suspendCount > 0) {
       toast.error(`${suspendCount} account(s) SUSPENDED!`, { id: 'bulk-refresh' });
     } else if (failCount === 0) {
-      toast.success(`${successCount} account(s) refreshed (${proxyMode})`, { id: 'bulk-refresh' });
+      toast.success(`${successCount} account(s) refreshed`, { id: 'bulk-refresh' });
     } else {
-      toast.warning(`${successCount} refreshed, ${failCount} failed (${proxyMode})`, { id: 'bulk-refresh' });
+      toast.warning(`${successCount} refreshed, ${failCount} failed`, { id: 'bulk-refresh' });
     }
 
     setSelectedAccounts(new Set());
@@ -1421,30 +1482,27 @@ export default function InstagramManage() {
                 Batch ({selectedAccounts.size})
               </Button>
 
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={selectedAccounts.size === 0 || bulkRefreshing}
-                    className="gap-1.5"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${bulkRefreshing ? 'animate-spin' : ''}`} />
-                    Refresh ({selectedAccounts.size})
-                    <ChevronDown className="h-3 w-3" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => handleBulkRefresh(false)}>
-                    <Globe className="h-4 w-4 mr-2" />
-                    With Proxy
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleBulkRefresh(true)}>
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Without Proxy
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleBulkRefresh()}
+                disabled={selectedAccounts.size === 0 || bulkRefreshing}
+                className="gap-1.5"
+              >
+                <RefreshCw className={`h-4 w-4 ${bulkRefreshing ? 'animate-spin' : ''}`} />
+                Refresh ({selectedAccounts.size})
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleBulkAssignProxy}
+                disabled={selectedAccounts.size === 0 || availableCount === 0}
+                className="gap-1.5 text-blue-500 hover:text-blue-400 border-blue-500/30 hover:border-blue-500/50"
+              >
+                <Server className="h-4 w-4" />
+                Assign Proxy ({selectedAccounts.size})
+              </Button>
 
               <Button
                 variant="outline"
