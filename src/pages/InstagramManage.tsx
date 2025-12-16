@@ -16,10 +16,10 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { BulkImportDialog } from '@/components/instagram/BulkImportDialog';
 import { MobileAccountCard } from '@/components/instagram/MobileAccountCard';
 import { InstagramProxyManagement } from '@/components/instagram/InstagramProxyManagement';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useInstagramProxies } from '@/hooks/useInstagramProxies';
 import { 
   Plus, 
   RefreshCw, 
@@ -32,7 +32,6 @@ import {
   CheckCircle2,
   XCircle,
   ChevronDown,
-  FileSpreadsheet,
   Sparkles,
   FolderPlus,
   Layers,
@@ -85,6 +84,7 @@ const isToday = (dateString: string | null): boolean => {
 export default function InstagramManage() {
   const { user, profile } = useAuth();
   const isMobile = useIsMobile();
+  const { availableCount, totalCount, fetchProxies: refetchProxies } = useInstagramProxies();
   const [accounts, setAccounts] = useState<InstagramAccount[]>([]);
   const [batches, setBatches] = useState<AccountBatch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,7 +98,6 @@ export default function InstagramManage() {
   const [imageUrl, setImageUrl] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState('');
-  const [bulkImportOpen, setBulkImportOpen] = useState(false);
   
   // Batch management state
   const [selectedBatchFilter, setSelectedBatchFilter] = useState<string>('unbatched');
@@ -138,27 +137,13 @@ export default function InstagramManage() {
 
   // Proxy management state
   const [proxyModalOpen, setProxyModalOpen] = useState(false);
-  const [proxyCount, setProxyCount] = useState(0);
 
   useEffect(() => {
     if (user) {
       fetchAccounts();
       fetchBatches();
-      fetchProxyCount();
     }
   }, [user]);
-
-  const fetchProxyCount = async () => {
-    if (!user) return;
-    const { count, error } = await supabase
-      .from('instagram_proxies')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', user.id);
-    
-    if (!error && count !== null) {
-      setProxyCount(count);
-    }
-  };
 
   const fetchAccounts = async () => {
     if (!user) return;
@@ -890,30 +875,19 @@ export default function InstagramManage() {
             >
               <Globe className="h-4 w-4" />
               Add Proxy
-              {proxyCount > 0 && (
-                <Badge variant="secondary" className="ml-1">{proxyCount}</Badge>
+              {totalCount > 0 && (
+                <Badge variant="secondary" className="ml-1">{availableCount}/{totalCount}</Badge>
               )}
             </Button>
             
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button className="gap-2" disabled={proxyCount === 0}>
-                  <Plus className="h-4 w-4" />
-                  Add Account
-                  <ChevronDown className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-popover border-border">
-                <DropdownMenuItem onClick={() => setImportOpen(true)} className="gap-2">
-                  <Plus className="h-4 w-4" />
-                  Single Add Account
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setBulkImportOpen(true)} className="gap-2">
-                  <FileSpreadsheet className="h-4 w-4" />
-                  Bulk Add Account
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Button 
+              className="gap-2" 
+              disabled={availableCount === 0}
+              onClick={() => setImportOpen(true)}
+            >
+              <Plus className="h-4 w-4" />
+              Add Account
+            </Button>
           </div>
 
           <Dialog open={importOpen} onOpenChange={setImportOpen}>
