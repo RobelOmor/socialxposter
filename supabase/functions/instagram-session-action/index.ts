@@ -14,13 +14,10 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
     const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: req.headers.get('Authorization')! } }
     });
-
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
     if (authError || !user) {
@@ -30,7 +27,7 @@ serve(async (req) => {
       );
     }
 
-    const { accountId, action, skipProxy } = await req.json();
+    const { accountId, action } = await req.json();
     
     if (!accountId) {
       return new Response(
@@ -54,134 +51,68 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Performing ${action} on account:`, account.username, skipProxy ? '(WITHOUT PROXY)' : '(WITH PROXY)');
+    console.log(`Performing ${action} on account:`, account.username);
 
-    // Get assigned proxy for this account (skip if skipProxy is true)
-    let assignedProxy = null;
-    if (!skipProxy) {
-      const { data: proxyData, error: proxyFetchError } = await supabaseClient
-        .from('instagram_proxies')
-        .select('*')
-        .eq('used_by_account_id', accountId)
-        .single();
-
-      if (proxyFetchError || !proxyData) {
-        console.error('No assigned proxy for account:', accountId);
-        return new Response(
-          JSON.stringify({ success: false, error: 'No proxy assigned to this account. Please re-add the account.' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      assignedProxy = proxyData;
-      console.log('Using assigned proxy:', assignedProxy.proxy_host, ':', assignedProxy.proxy_port);
-    } else {
-      console.log('SKIPPING PROXY - Direct connection mode');
-    }
-
-    // Get VPS IP from admin config
-    const { data: config, error: configError } = await supabaseAdmin
-      .from('telegram_admin_config')
-      .select('instagram_vps_ip')
-      .single();
-
-    if (configError || !config?.instagram_vps_ip) {
-      console.error('Instagram VPS IP not configured:', configError);
-      return new Response(
-        JSON.stringify({ success: false, error: 'Instagram VPS IP not configured in admin panel' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    let vpsBaseUrl = config.instagram_vps_ip;
+    // Parse cookies
+    let cookieObj: Record<string, string> = {};
+    const cookieString = account.cookies;
     
-    // Handle different URL formats
-    if (vpsBaseUrl.includes('.ngrok') || vpsBaseUrl.includes('ngrok-free.app')) {
-      if (!vpsBaseUrl.startsWith('http://') && !vpsBaseUrl.startsWith('https://')) {
-        vpsBaseUrl = `https://${vpsBaseUrl}`;
-      }
-    } else if (vpsBaseUrl.startsWith('http://') || vpsBaseUrl.startsWith('https://')) {
-      // URL already has protocol, use as-is
-    } else {
-      // Plain IP, use Instagram port 8001
-      vpsBaseUrl = `http://${vpsBaseUrl}:8001`;
+    if (cookieString.includes(';')) {
+      cookieString.split(';').forEach((cookie: string) => {
+        const [key, value] = cookie.trim().split('=');
+        if (key && value) {
+          cookieObj[key.trim()] = value.trim();
+        }
+      });
     }
 
-    vpsBaseUrl = vpsBaseUrl.replace(/\/$/, '');
+    const csrfToken = cookieObj['csrftoken'] || '';
 
-    console.log(`Calling VPS for session validation: ${vpsBaseUrl}/validate-session`, skipProxy ? '(NO PROXY)' : '(WITH PROXY)');
+    // Call Instagram API directly to validate/refresh session
+    console.log('Calling Instagram API directly for session validation');
 
-    // Build request body - conditionally include proxy fields
-    const requestBody: Record<string, unknown> = { 
-      cookies: account.cookies,
-    };
-
-    if (assignedProxy && !skipProxy) {
-      // Include proxy fields only when not skipping proxy
-      requestBody.proxy_host = assignedProxy.proxy_host;
-      requestBody.proxy_port = assignedProxy.proxy_port;
-      requestBody.proxy_username = assignedProxy.proxy_username;
-      requestBody.proxy_password = assignedProxy.proxy_password;
-      requestBody.proxy_type = 'http';
-    }
-
-    console.log('Request body:', JSON.stringify({ ...requestBody, cookies: '[HIDDEN]' }));
-
-    // Call VPS to validate session
-    const vpsResponse = await fetch(`${vpsBaseUrl}/validate-session`, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': 'true'
+    const igResponse = await fetch('https://i.instagram.com/api/v1/accounts/current_user/?edit=true', {
+      method: 'GET',
+      headers: {
+        'Cookie': cookieString,
+        'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229237)',
+        'X-IG-App-ID': '936619743392459',
+        'X-CSRFToken': csrfToken,
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'X-IG-Device-ID': crypto.randomUUID(),
+        'X-IG-Android-ID': 'android-' + crypto.randomUUID().replace(/-/g, '').substring(0, 16),
       },
-      body: JSON.stringify(requestBody),
     });
 
-    const vpsResult = await vpsResponse.json();
-    console.log('VPS Response:', JSON.stringify(vpsResult));
-
-    // If VPS cannot use SOCKS proxy, do NOT mark account as expired.
-    if (typeof vpsResult?.error === 'string' && vpsResult.error.toLowerCase().includes('missing dependencies for socks')) {
-      const socksProxyHint =
-        'VPS could not use the SOCKS proxy. If httpx[socks]/socksio is already installed, the proxy is likely not SOCKS5 or the credentials/IP allowlist are incorrect.';
-
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: `SOCKS proxy error: ${vpsResult.error}. ${socksProxyHint}`,
-          reason: 'vps_proxy_error',
-          vps_response: vpsResult,
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    const igResult = await igResponse.json();
+    console.log('Instagram API Response status:', igResponse.status);
+    console.log('Instagram API Response:', JSON.stringify(igResult).substring(0, 500));
 
     let newStatus: 'active' | 'expired' | 'suspended' = 'expired';
     let updateData: any = {
       last_checked: new Date().toISOString(),
     };
 
-    const isValid = (vpsResult?.success && vpsResult?.user) || vpsResult?.valid === true;
+    // Check for suspended account
+    const isSuspended = igResult?.message === 'challenge_required' ||
+      igResult?.message === 'user_has_logged_out' ||
+      (typeof igResult?.checkpoint_url === 'string' && igResult.checkpoint_url.includes('suspended'));
 
-    const isSuspended =
-      vpsResult?.status === 'suspended' ||
-      vpsResult?.message === 'challenge_required' ||
-      (typeof vpsResult?.url === 'string' &&
-        vpsResult.url.includes('instagram.com/accounts/suspended/'));
+    // Check for valid response
+    const isValid = igResult?.user && igResponse.status === 200;
 
     if (isValid) {
-      // VPS may return either { success: true, user: {...} } or { valid: true, ...fields }
-      const igUser =
-        vpsResult?.user && typeof vpsResult.user === 'object' ? vpsResult.user : vpsResult;
-
+      const igUser = igResult.user;
       newStatus = 'active';
       updateData = {
         ...updateData,
         full_name: igUser?.full_name ?? '',
         profile_pic_url: igUser?.profile_pic_url ?? null,
-        posts_count: igUser?.media_count ?? igUser?.posts_count ?? 0,
-        followers_count: igUser?.follower_count ?? igUser?.followers_count ?? 0,
+        posts_count: igUser?.media_count ?? 0,
+        followers_count: igUser?.follower_count ?? 0,
         following_count: igUser?.following_count ?? 0,
-        bio: igUser?.biography ?? igUser?.bio ?? '',
+        bio: igUser?.biography ?? '',
         status: 'active',
       };
       console.log('Session is ACTIVE');
@@ -213,7 +144,7 @@ serve(async (req) => {
         success: true, 
         status: newStatus,
         data: updateData,
-        vps_response: vpsResult
+        instagram_response: igResult
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
