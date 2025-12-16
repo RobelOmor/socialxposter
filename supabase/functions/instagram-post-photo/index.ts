@@ -66,6 +66,23 @@ serve(async (req) => {
 
     console.log('Posting photo to account:', account.username);
 
+    // Get assigned proxy for this account
+    const { data: assignedProxy, error: proxyFetchError } = await supabaseClient
+      .from('instagram_proxies')
+      .select('*')
+      .eq('used_by_account_id', accountId)
+      .single();
+
+    if (proxyFetchError || !assignedProxy) {
+      console.error('No assigned proxy for account:', accountId);
+      return new Response(
+        JSON.stringify({ success: false, error: 'No proxy assigned to this account. Please re-add the account.' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log('Using assigned proxy:', assignedProxy.proxy_host, ':', assignedProxy.proxy_port);
+
     // Get VPS IP from admin config
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -102,14 +119,23 @@ serve(async (req) => {
 
     console.log(`Calling VPS for photo post: ${vpsBaseUrl}/post-photo`);
 
-    // Call VPS to post photo
+    // Call VPS to post photo with HTTP proxy
     const vpsResponse = await fetch(`${vpsBaseUrl}/post-photo`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true'
+      },
       body: JSON.stringify({
         cookies: account.cookies,
         image_url: imageUrl,
         image_data: imageData,
+        // Telegram-style explicit fields for HTTP proxy
+        proxy_host: assignedProxy.proxy_host,
+        proxy_port: assignedProxy.proxy_port,
+        proxy_username: assignedProxy.proxy_username,
+        proxy_password: assignedProxy.proxy_password,
+        proxy_type: 'http',  // Use HTTP proxy, not SOCKS5
       }),
     });
 

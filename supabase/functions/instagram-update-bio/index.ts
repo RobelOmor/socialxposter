@@ -59,6 +59,23 @@ Deno.serve(async (req) => {
 
     console.log(`Updating bio for account: ${account.username}`);
 
+    // Get assigned proxy for this account
+    const { data: assignedProxy, error: proxyFetchError } = await supabase
+      .from('instagram_proxies')
+      .select('*')
+      .eq('used_by_account_id', accountId)
+      .single();
+
+    if (proxyFetchError || !assignedProxy) {
+      console.error('No assigned proxy for account:', accountId);
+      return new Response(
+        JSON.stringify({ success: false, error: 'No proxy assigned to this account. Please re-add the account.' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+      );
+    }
+
+    console.log('Using assigned proxy:', assignedProxy.proxy_host, ':', assignedProxy.proxy_port);
+
     // Get VPS IP from admin config
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
@@ -94,13 +111,22 @@ Deno.serve(async (req) => {
 
     console.log(`Calling VPS for bio update: ${vpsBaseUrl}/update-bio`);
 
-    // Call VPS to update bio
+    // Call VPS to update bio with HTTP proxy
     const vpsResponse = await fetch(`${vpsBaseUrl}/update-bio`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true'
+      },
       body: JSON.stringify({
         cookies: account.cookies,
         new_bio: newBio || '',
+        // Telegram-style explicit fields for HTTP proxy
+        proxy_host: assignedProxy.proxy_host,
+        proxy_port: assignedProxy.proxy_port,
+        proxy_username: assignedProxy.proxy_username,
+        proxy_password: assignedProxy.proxy_password,
+        proxy_type: 'http',  // Use HTTP proxy, not SOCKS5
       }),
     });
 
