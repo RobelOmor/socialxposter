@@ -59,81 +59,49 @@ Deno.serve(async (req) => {
 
     console.log(`Updating bio for account: ${account.username}`);
 
-    // Get assigned proxy for this account
-    const { data: assignedProxy, error: proxyFetchError } = await supabase
-      .from('instagram_proxies')
-      .select('*')
-      .eq('used_by_account_id', accountId)
-      .single();
-
-    if (proxyFetchError || !assignedProxy) {
-      console.error('No assigned proxy for account:', accountId);
-      return new Response(
-        JSON.stringify({ success: false, error: 'No proxy assigned to this account. Please re-add the account.' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
-      );
-    }
-
-    console.log('Using assigned proxy:', assignedProxy.proxy_host, ':', assignedProxy.proxy_port);
-
-    // Get VPS IP from admin config
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
-
-    const { data: config, error: configError } = await supabaseAdmin
-      .from('telegram_admin_config')
-      .select('instagram_vps_ip')
-      .single();
-
-    if (configError || !config?.instagram_vps_ip) {
-      console.error('Instagram VPS IP not configured:', configError);
-      return new Response(
-        JSON.stringify({ success: false, error: 'Instagram VPS IP not configured in admin panel' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
-      );
-    }
-
-    let vpsBaseUrl = config.instagram_vps_ip;
+    // Parse cookies
+    let cookieObj: Record<string, string> = {};
+    const cookieString = account.cookies;
     
-    // Handle different URL formats
-    if (vpsBaseUrl.includes('.ngrok') || vpsBaseUrl.includes('ngrok-free.app')) {
-      if (!vpsBaseUrl.startsWith('http://') && !vpsBaseUrl.startsWith('https://')) {
-        vpsBaseUrl = `https://${vpsBaseUrl}`;
-      }
-    } else if (vpsBaseUrl.startsWith('http://') || vpsBaseUrl.startsWith('https://')) {
-      // URL already has protocol, use as-is
-    } else {
-      // Plain IP, use Instagram port 8001
-      vpsBaseUrl = `http://${vpsBaseUrl}:8001`;
+    if (cookieString.includes(';')) {
+      cookieString.split(';').forEach((cookie: string) => {
+        const [key, value] = cookie.trim().split('=');
+        if (key && value) {
+          cookieObj[key.trim()] = value.trim();
+        }
+      });
     }
 
-    vpsBaseUrl = vpsBaseUrl.replace(/\/$/, '');
+    const csrfToken = cookieObj['csrftoken'] || '';
 
-    console.log(`Calling VPS for bio update: ${vpsBaseUrl}/update-bio`);
+    // Call Instagram API directly to update bio
+    console.log('Calling Instagram API directly to update bio');
 
-    // Call VPS to update bio with HTTP proxy
-    const vpsResponse = await fetch(`${vpsBaseUrl}/update-bio`, {
+    const formData = new URLSearchParams();
+    formData.append('biography', newBio || '');
+    formData.append('email', '');
+    formData.append('phone_number', '');
+    formData.append('external_url', '');
+    formData.append('first_name', account.full_name || '');
+
+    const igResponse = await fetch('https://i.instagram.com/api/v1/accounts/edit_profile/', {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': 'true'
+      headers: {
+        'Cookie': cookieString,
+        'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229237)',
+        'X-IG-App-ID': '936619743392459',
+        'X-CSRFToken': csrfToken,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
       },
-      body: JSON.stringify({
-        cookies: account.cookies,
-        new_bio: newBio || '',
-        // Telegram-style explicit fields for HTTP proxy
-        proxy_host: assignedProxy.proxy_host,
-        proxy_port: assignedProxy.proxy_port,
-        proxy_username: assignedProxy.proxy_username,
-        proxy_password: assignedProxy.proxy_password,
-        proxy_type: 'http',  // Use HTTP proxy, not SOCKS5
-      }),
+      body: formData.toString(),
     });
 
-    const vpsResult = await vpsResponse.json();
-    console.log('VPS Response:', JSON.stringify(vpsResult));
+    const igResult = await igResponse.json();
+    console.log('Instagram API Response:', JSON.stringify(igResult));
 
-    if (vpsResult.success) {
+    if (igResult.status === 'ok' || igResult.user) {
       // Update bio in database
       await supabase
         .from('instagram_accounts')
@@ -150,7 +118,7 @@ Deno.serve(async (req) => {
       );
     } else {
       // Check if account is suspended/expired
-      if (vpsResult.status === 'suspended') {
+      if (igResult.message === 'challenge_required') {
         await supabase
           .from('instagram_accounts')
           .update({ status: 'suspended', last_checked: new Date().toISOString() })
@@ -164,7 +132,7 @@ Deno.serve(async (req) => {
           }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
         );
-      } else if (vpsResult.status === 'expired') {
+      } else if (igResult.message === 'login_required') {
         await supabase
           .from('instagram_accounts')
           .update({ status: 'expired', last_checked: new Date().toISOString() })
@@ -183,7 +151,7 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({ 
           success: false, 
-          error: vpsResult.error || 'Failed to update bio'
+          error: igResult.message || 'Failed to update bio'
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
       );
