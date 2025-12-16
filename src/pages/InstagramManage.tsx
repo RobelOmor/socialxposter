@@ -2166,9 +2166,14 @@ export default function InstagramManage() {
                 </Badge>
               </div>
 
-              {/* Logs list */}
+              {/* Logs list - show only last 50 to prevent crash */}
               <div className="max-h-96 overflow-y-auto space-y-2">
-                {bulkPostReport?.details.map((detail, idx) => (
+                {bulkPostReport && bulkPostReport.details.length > 50 && (
+                  <div className="p-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-sm text-yellow-500 text-center mb-2">
+                    Showing last 50 of {bulkPostReport.details.length} logs
+                  </div>
+                )}
+                {bulkPostReport?.details.slice(-50).map((detail, idx) => (
                   <div 
                     key={idx}
                     className={`p-3 rounded-lg text-sm border ${
@@ -2219,15 +2224,15 @@ export default function InstagramManage() {
                     
                     {detail.error && (
                       <div className="mt-2 space-y-2">
-                        <p className="text-xs text-destructive">{detail.error}</p>
+                        <p className="text-xs text-destructive line-clamp-2">{String(detail.error).slice(0, 200)}</p>
 
                         {detail.errorBody && (
                           <details className="rounded-md border border-border bg-muted/40 p-2">
                             <summary className="cursor-pointer text-xs text-muted-foreground">
                               Details
                             </summary>
-                            <pre className="mt-2 whitespace-pre-wrap break-words text-xs text-muted-foreground">
-                              {detail.errorBody}
+                            <pre className="mt-2 whitespace-pre-wrap break-words text-xs text-muted-foreground max-h-32 overflow-y-auto">
+                              {String(detail.errorBody).slice(0, 500)}
                             </pre>
                           </details>
                         )}
@@ -2341,9 +2346,14 @@ export default function InstagramManage() {
                     </div>
                   </div>
 
-                  {/* Details */}
+                  {/* Details - show only last 50 to prevent crash */}
+                  {linkPostReport.details.length > 50 && (
+                    <div className="p-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-sm text-yellow-500 text-center">
+                      Showing last 50 of {linkPostReport.details.length} logs
+                    </div>
+                  )}
                   <div className="max-h-48 overflow-y-auto space-y-2">
-                    {linkPostReport.details.map((detail, idx) => (
+                    {linkPostReport.details.slice(-50).map((detail, idx) => (
                       <div 
                         key={idx}
                         className={`flex items-center justify-between p-2 rounded-lg text-sm ${
@@ -2356,7 +2366,7 @@ export default function InstagramManage() {
                             <CheckCircle2 className="h-4 w-4 text-green-500" />
                           ) : (
                             <>
-                              <span title={detail.error} className="text-xs text-red-400 max-w-32 truncate">{detail.error}</span>
+                              <span title={detail.error} className="text-xs text-red-400 max-w-32 truncate">{String(detail.error || '').slice(0, 50)}</span>
                               <XCircle className="h-4 w-4 text-red-500" />
                             </>
                           )}
