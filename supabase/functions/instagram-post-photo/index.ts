@@ -253,8 +253,8 @@ serve(async (req) => {
       'X-Instagram-Rupload-Params': JSON.stringify({
         'media_type': 1,
         'upload_id': uploadId,
-        'upload_media_height': imgHeight,
-        'upload_media_width': imgWidth,
+        'upload_media_height': cropHeight,
+        'upload_media_width': cropWidth,
       }),
       'X-Entity-Name': uploadName,
       'X-Entity-Length': imageBytes.length.toString(),
@@ -298,11 +298,6 @@ serve(async (req) => {
     // Step 2: Configure/publish the photo with crop settings
     console.log('Step 2: Configuring/publishing photo...');
 
-    // Calculate crop center as percentage offset from center (0 = center)
-    const cropCenterX = imgWidth > 0 ? (offsetX + cropWidth / 2 - imgWidth / 2) / imgWidth : 0;
-    const cropCenterY = imgHeight > 0 ? (offsetY + cropHeight / 2 - imgHeight / 2) / imgHeight : 0;
-    const cropZoom = imgWidth > 0 ? imgWidth / cropWidth : 1;
-
     const configureData = {
       'upload_id': uploadId,
       'source_type': '4',
@@ -314,13 +309,13 @@ serve(async (req) => {
         'android_release': '13'
       },
       'edits': {
-        'crop_original_size': [imgWidth, imgHeight],
-        'crop_center': [cropCenterX, cropCenterY],
-        'crop_zoom': cropZoom
+        'crop_original_size': [cropWidth, cropHeight],
+        'crop_center': [0.0, 0.0],
+        'crop_zoom': 1.0
       },
       'extra': {
-        'source_width': imgWidth,
-        'source_height': imgHeight
+        'source_width': cropWidth,
+        'source_height': cropHeight
       }
     };
 
