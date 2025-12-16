@@ -51,7 +51,21 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Performing ${action} on account:`, account.username);
+    // Check if account has a proxy assigned
+    const { data: proxy, error: proxyError } = await supabaseClient
+      .from('instagram_proxies')
+      .select('id, proxy_host, proxy_port')
+      .eq('used_by_account_id', accountId)
+      .single();
+
+    if (proxyError || !proxy) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'No proxy assigned. Please assign a proxy first.' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log(`Performing ${action} on account:`, account.username, 'using proxy:', proxy.proxy_host);
 
     // Parse cookies
     let cookieObj: Record<string, string> = {};

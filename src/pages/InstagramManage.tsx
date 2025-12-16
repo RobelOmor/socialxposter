@@ -442,6 +442,49 @@ export default function InstagramManage() {
     }
   };
 
+  // Assign an available proxy to an account that doesn't have one
+  const handleAssignProxy = async (account: InstagramAccount) => {
+    if (!user) return;
+    
+    try {
+      // Get an available proxy
+      const { data: availableProxy, error: proxyError } = await supabase
+        .from('instagram_proxies')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('status', 'available')
+        .is('used_by_account_id', null)
+        .limit(1)
+        .single();
+
+      if (proxyError || !availableProxy) {
+        toast.error('No available proxy. Please add more proxies first.');
+        return;
+      }
+
+      // Assign proxy to account
+      const { error: updateError } = await supabase
+        .from('instagram_proxies')
+        .update({ 
+          status: 'used',
+          used_by_account_id: account.id,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', availableProxy.id);
+
+      if (updateError) {
+        toast.error('Failed to assign proxy');
+        return;
+      }
+
+      toast.success(`Proxy assigned to @${account.username}`);
+      fetchAccountProxies();
+      refetchProxies();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to assign proxy');
+    }
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -630,7 +673,26 @@ export default function InstagramManage() {
     }
 
     setBulkRefreshing(true);
-    const selectedArray = Array.from(selectedAccounts);
+    
+    // Filter accounts: only those with proxy assigned (unless skipping proxy)
+    let selectedArray = Array.from(selectedAccounts);
+    if (!skipProxy) {
+      const accountsWithProxy = selectedArray.filter(id => accountProxies.has(id));
+      const accountsWithoutProxy = selectedArray.length - accountsWithProxy.length;
+      
+      if (accountsWithProxy.length === 0) {
+        toast.error('No accounts with proxy assigned');
+        setBulkRefreshing(false);
+        return;
+      }
+      
+      if (accountsWithoutProxy > 0) {
+        toast.warning(`${accountsWithoutProxy} accounts skipped (no proxy)`);
+      }
+      
+      selectedArray = accountsWithProxy;
+    }
+    
     let successCount = 0;
     let failCount = 0;
     let suspendCount = 0;
@@ -739,17 +801,25 @@ export default function InstagramManage() {
     setLinkPostProgress(0);
     setLinkPostReport(null);
 
-    // Filter accounts: active + can post (not in cooldown + has daily remaining)
+    // Filter accounts: active + can post (not in cooldown + has daily remaining) + has proxy
     const allSelected = accounts.filter(a => selectedAccounts.has(a.id));
-    const eligibleAccounts = allSelected.filter(a => canAccountPost(a));
-    const skippedAccounts = allSelected.filter(a => !canAccountPost(a));
+    const eligibleAccounts = allSelected.filter(a => canAccountPost(a) && accountProxies.has(a.id));
+    const skippedNoProxy = allSelected.filter(a => !accountProxies.has(a.id));
+    const skippedAccounts = allSelected.filter(a => accountProxies.has(a.id) && !canAccountPost(a));
     
     if (eligibleAccounts.length === 0) {
-      toast.error('No eligible accounts (check daily limits & cooldowns)');
+      if (skippedNoProxy.length > 0) {
+        toast.error('No accounts with proxy assigned');
+      } else {
+        toast.error('No eligible accounts (check daily limits & cooldowns)');
+      }
       setLinkPosting(false);
       return;
     }
 
+    if (skippedNoProxy.length > 0) {
+      toast.warning(`${skippedNoProxy.length} accounts skipped (no proxy)`);
+    }
     if (skippedAccounts.length > 0) {
       toast.warning(`${skippedAccounts.length} accounts skipped (limit/cooldown)`);
     }
@@ -869,13 +939,31 @@ export default function InstagramManage() {
     setBulkPostProgress(0);
     setBulkPostReport(null);
 
-    const selectedAccountsList = accounts.filter(a => selectedAccounts.has(a.id) && a.status === 'active');
+    // Filter accounts: active + has proxy
+    const selectedAccountsList = accounts.filter(a => 
+      selectedAccounts.has(a.id) && 
+      a.status === 'active' && 
+      accountProxies.has(a.id)
+    );
+    const skippedNoProxy = accounts.filter(a => 
+      selectedAccounts.has(a.id) && 
+      a.status === 'active' && 
+      !accountProxies.has(a.id)
+    );
     const totalAccounts = selectedAccountsList.length;
     
     if (totalAccounts === 0) {
-      toast.error('No active accounts selected');
+      if (skippedNoProxy.length > 0) {
+        toast.error('No accounts with proxy assigned');
+      } else {
+        toast.error('No active accounts selected');
+      }
       setBulkPosting(false);
       return;
+    }
+
+    if (skippedNoProxy.length > 0) {
+      toast.warning(`${skippedNoProxy.length} accounts skipped (no proxy)`);
     }
 
     // Get unique photo URLs from the selected category (one per account)
@@ -1541,13 +1629,25 @@ export default function InstagramManage() {
                                 )}
                                 
                                 {/* Proxy indicator */}
-                                {proxy && (
+                                {proxy ? (
                                   <div className="flex items-center justify-center gap-1">
                                     <Server className="h-3 w-3 text-blue-400" />
                                     <span className="text-xs text-blue-400 truncate max-w-[80px]" title={`${proxy.proxy_host}:${proxy.proxy_port}`}>
                                       {proxy.proxy_host.split('.').slice(-2).join('.')}
                                     </span>
                                   </div>
+                                ) : (
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    className="h-6 px-2 text-xs text-red-500 hover:text-red-400 hover:bg-red-500/10"
+                                    onClick={() => handleAssignProxy(account)}
+                                    disabled={availableCount === 0}
+                                    title={availableCount === 0 ? 'No available proxy' : 'Click to assign proxy'}
+                                  >
+                                    <AlertTriangle className="h-3 w-3 mr-1" />
+                                    No Proxy
+                                  </Button>
                                 )}
                               </div>
                             );
@@ -1596,32 +1696,39 @@ export default function InstagramManage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center justify-end gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openPostDialog(account)}
-                              disabled={account.status !== 'active'}
-                            >
-                              <ImagePlus className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleRefreshAccount(account)}
-                            >
-                              <RefreshCw className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleDeleteAccount(account)}
-                              disabled={totalCount === 0}
-                              className="text-destructive hover:text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
+                          {(() => {
+                            const hasProxy = accountProxies.has(account.id);
+                            return (
+                              <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openPostDialog(account)}
+                                  disabled={account.status !== 'active' || !hasProxy}
+                                  title={!hasProxy ? 'Assign proxy first' : 'Post photo'}
+                                >
+                                  <ImagePlus className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleRefreshAccount(account)}
+                                  disabled={!hasProxy}
+                                  title={!hasProxy ? 'Assign proxy first' : 'Refresh account'}
+                                >
+                                  <RefreshCw className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleDeleteAccount(account)}
+                                  className="text-destructive hover:text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            );
+                          })()}
                         </TableCell>
                       </TableRow>
                     ))}
