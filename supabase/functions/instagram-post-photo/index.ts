@@ -6,26 +6,66 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Function to get JPEG dimensions from image bytes
-function getJpegDimensions(imageBytes: Uint8Array): { width: number; height: number } | null {
+// Function to get image dimensions from bytes (supports JPEG, PNG, GIF, WebP)
+function getImageDimensions(imageBytes: Uint8Array): { width: number; height: number } | null {
   try {
-    // Look for SOF0 (Start of Frame) marker in JPEG
-    // JPEG markers start with 0xFF
-    for (let i = 0; i < imageBytes.length - 10; i++) {
-      // Look for SOF markers (0xFFC0-0xFFC3 are common frame markers)
-      if (imageBytes[i] === 0xFF && 
-          (imageBytes[i + 1] === 0xC0 || imageBytes[i + 1] === 0xC1 || 
-           imageBytes[i + 1] === 0xC2 || imageBytes[i + 1] === 0xC3)) {
-        // SOF marker found, dimensions are at offset +5 (height) and +7 (width)
-        const height = (imageBytes[i + 5] << 8) | imageBytes[i + 6];
-        const width = (imageBytes[i + 7] << 8) | imageBytes[i + 8];
+    // Check PNG signature (89 50 4E 47)
+    if (imageBytes[0] === 0x89 && imageBytes[1] === 0x50 && imageBytes[2] === 0x4E && imageBytes[3] === 0x47) {
+      // PNG: width at offset 16-19, height at offset 20-23 (big endian)
+      const width = (imageBytes[16] << 24) | (imageBytes[17] << 16) | (imageBytes[18] << 8) | imageBytes[19];
+      const height = (imageBytes[20] << 24) | (imageBytes[21] << 16) | (imageBytes[22] << 8) | imageBytes[23];
+      if (width > 0 && height > 0) {
+        console.log('Detected PNG dimensions:', width, 'x', height);
+        return { width, height };
+      }
+    }
+    
+    // Check GIF signature (47 49 46 38)
+    if (imageBytes[0] === 0x47 && imageBytes[1] === 0x49 && imageBytes[2] === 0x46 && imageBytes[3] === 0x38) {
+      // GIF: width at offset 6-7, height at offset 8-9 (little endian)
+      const width = imageBytes[6] | (imageBytes[7] << 8);
+      const height = imageBytes[8] | (imageBytes[9] << 8);
+      if (width > 0 && height > 0) {
+        console.log('Detected GIF dimensions:', width, 'x', height);
+        return { width, height };
+      }
+    }
+    
+    // Check WebP signature (RIFF....WEBP)
+    if (imageBytes[0] === 0x52 && imageBytes[1] === 0x49 && imageBytes[2] === 0x46 && imageBytes[3] === 0x46 &&
+        imageBytes[8] === 0x57 && imageBytes[9] === 0x45 && imageBytes[10] === 0x42 && imageBytes[11] === 0x50) {
+      // WebP VP8: look for VP8 chunk
+      if (imageBytes[12] === 0x56 && imageBytes[13] === 0x50 && imageBytes[14] === 0x38 && imageBytes[15] === 0x20) {
+        // VP8 lossy format
+        const width = ((imageBytes[26] | (imageBytes[27] << 8)) & 0x3FFF);
+        const height = ((imageBytes[28] | (imageBytes[29] << 8)) & 0x3FFF);
         if (width > 0 && height > 0) {
+          console.log('Detected WebP VP8 dimensions:', width, 'x', height);
           return { width, height };
         }
       }
     }
+    
+    // Check JPEG (FF D8 FF)
+    if (imageBytes[0] === 0xFF && imageBytes[1] === 0xD8 && imageBytes[2] === 0xFF) {
+      // JPEG: Look for SOF0 (Start of Frame) marker
+      for (let i = 0; i < imageBytes.length - 10; i++) {
+        if (imageBytes[i] === 0xFF && 
+            (imageBytes[i + 1] === 0xC0 || imageBytes[i + 1] === 0xC1 || 
+             imageBytes[i + 1] === 0xC2 || imageBytes[i + 1] === 0xC3)) {
+          const height = (imageBytes[i + 5] << 8) | imageBytes[i + 6];
+          const width = (imageBytes[i + 7] << 8) | imageBytes[i + 8];
+          if (width > 0 && height > 0) {
+            console.log('Detected JPEG dimensions:', width, 'x', height);
+            return { width, height };
+          }
+        }
+      }
+    }
+    
     return null;
-  } catch {
+  } catch (e) {
+    console.error('Error detecting dimensions:', e);
     return null;
   }
 }
@@ -141,14 +181,34 @@ serve(async (req) => {
     
     if (imageUrl) {
       console.log('Downloading image from URL:', imageUrl);
-      const imageResponse = await fetch(imageUrl);
+      // Download with browser-like headers to avoid blocks
+      const imageResponse = await fetch(imageUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': imageUrl,
+        }
+      });
+      
       if (!imageResponse.ok) {
+        console.error('Image download failed:', imageResponse.status, imageResponse.statusText);
         return new Response(
-          JSON.stringify({ success: false, error: 'Failed to download image from URL' }),
+          JSON.stringify({ success: false, error: `Failed to download image: ${imageResponse.status}` }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+      
       imageBytes = new Uint8Array(await imageResponse.arrayBuffer());
+      console.log('Downloaded image bytes:', imageBytes.length);
+      
+      if (imageBytes.length < 100) {
+        console.error('Downloaded image too small, likely blocked');
+        return new Response(
+          JSON.stringify({ success: false, error: 'Image download failed - received empty or too small file' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     } else if (imageData) {
       // imageData is base64 encoded
       const base64Data = imageData.includes(',') ? imageData.split(',')[1] : imageData;
@@ -162,15 +222,14 @@ serve(async (req) => {
 
     console.log('Image size:', imageBytes.length, 'bytes');
 
-    // Get actual image dimensions
-    const dimensions = getJpegDimensions(imageBytes);
+    // Get actual image dimensions (supports JPEG, PNG, GIF, WebP)
+    const dimensions = getImageDimensions(imageBytes);
     let imgWidth = 1080;
     let imgHeight = 1080;
     
     if (dimensions) {
       imgWidth = dimensions.width;
       imgHeight = dimensions.height;
-      console.log('Detected image dimensions:', imgWidth, 'x', imgHeight);
     } else {
       console.log('Could not detect dimensions, using default 1080x1080');
     }
