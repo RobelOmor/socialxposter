@@ -75,10 +75,17 @@ const INSTAGRAM_MIN_RATIO = 4 / 5; // 0.8 (4:5)
 const INSTAGRAM_MAX_RATIO = 1.91; // 1.91:1
 const INSTAGRAM_MAX_DIMENSION = 1080; // standard feed max side
 const INSTAGRAM_JPEG_QUALITY = 85;
+const MAX_IMAGE_SIZE_FOR_PROCESSING = 500000; // 500KB - skip heavy processing for larger images
 
 async function normalizeImageForInstagram(
   originalBytes: Uint8Array,
 ): Promise<{ bytes: Uint8Array; width: number; height: number }> {
+  // Skip heavy image processing for large images to avoid memory limit
+  if (originalBytes.length > MAX_IMAGE_SIZE_FOR_PROCESSING) {
+    console.log("Image too large for processing, sending as-is (1080x1080 assumed)");
+    return { bytes: originalBytes, width: 1080, height: 1080 };
+  }
+
   const img = await Image.decode(originalBytes);
 
   const originalWidth = img.width;
