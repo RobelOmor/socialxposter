@@ -18,6 +18,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { BulkImportDialog } from '@/components/instagram/BulkImportDialog';
 import { MobileAccountCard } from '@/components/instagram/MobileAccountCard';
+import { InstagramProxyManagement } from '@/components/instagram/InstagramProxyManagement';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { 
   Plus, 
@@ -38,9 +39,12 @@ import {
   Send,
   Image as ImageIcon,
   Download,
-  Pencil
+  Pencil,
+  Globe,
+  AlertTriangle
 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 interface PhotoServiceCategory {
   id: string;
@@ -132,12 +136,29 @@ export default function InstagramManage() {
   const [newBatchNameRename, setNewBatchNameRename] = useState('');
   const [savingRename, setSavingRename] = useState(false);
 
+  // Proxy management state
+  const [proxyModalOpen, setProxyModalOpen] = useState(false);
+  const [proxyCount, setProxyCount] = useState(0);
+
   useEffect(() => {
     if (user) {
       fetchAccounts();
       fetchBatches();
+      fetchProxyCount();
     }
   }, [user]);
+
+  const fetchProxyCount = async () => {
+    if (!user) return;
+    const { count, error } = await supabase
+      .from('instagram_proxies')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id);
+    
+    if (!error && count !== null) {
+      setProxyCount(count);
+    }
+  };
 
   const fetchAccounts = async () => {
     if (!user) return;
@@ -835,25 +856,39 @@ export default function InstagramManage() {
             </p>
           </div>
           
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button className="gap-2">
-                <Plus className="h-4 w-4" />
-                Add Account
-                <ChevronDown className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="bg-popover border-border">
-              <DropdownMenuItem onClick={() => setImportOpen(true)} className="gap-2">
-                <Plus className="h-4 w-4" />
-                Single Add Account
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setBulkImportOpen(true)} className="gap-2">
-                <FileSpreadsheet className="h-4 w-4" />
-                Bulk Add Account
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              className="gap-2"
+              onClick={() => setProxyModalOpen(true)}
+            >
+              <Globe className="h-4 w-4" />
+              Add Proxy
+              {proxyCount > 0 && (
+                <Badge variant="secondary" className="ml-1">{proxyCount}</Badge>
+              )}
+            </Button>
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Add Account
+                  <ChevronDown className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="bg-popover border-border">
+                <DropdownMenuItem onClick={() => setImportOpen(true)} className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Single Add Account
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setBulkImportOpen(true)} className="gap-2">
+                  <FileSpreadsheet className="h-4 w-4" />
+                  Bulk Add Account
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
 
           <Dialog open={importOpen} onOpenChange={setImportOpen}>
             <DialogContent className="sm:max-w-lg">
@@ -895,7 +930,23 @@ export default function InstagramManage() {
               </div>
             </DialogContent>
           </Dialog>
+
+          <InstagramProxyManagement 
+            open={proxyModalOpen} 
+            onOpenChange={setProxyModalOpen}
+            onProxiesChange={fetchProxyCount}
+          />
         </div>
+
+        {/* No Proxy Warning */}
+        {proxyCount === 0 && (
+          <Alert variant="destructive" className="border-destructive/50 bg-destructive/10">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription className="font-semibold">
+              First Add Proxy Then Start Work
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Accounts Table */}
         <Card className="glass-card border-border/50">
