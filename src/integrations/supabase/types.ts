@@ -100,6 +100,62 @@ export type Database = {
           },
         ]
       }
+      instagram_proxies: {
+        Row: {
+          created_at: string | null
+          id: string
+          last_tested_at: string | null
+          proxy_host: string
+          proxy_location: string | null
+          proxy_password: string | null
+          proxy_port: number
+          proxy_username: string | null
+          status: string | null
+          test_result: string | null
+          updated_at: string | null
+          used_by_account_id: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          last_tested_at?: string | null
+          proxy_host: string
+          proxy_location?: string | null
+          proxy_password?: string | null
+          proxy_port: number
+          proxy_username?: string | null
+          status?: string | null
+          test_result?: string | null
+          updated_at?: string | null
+          used_by_account_id?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          last_tested_at?: string | null
+          proxy_host?: string
+          proxy_location?: string | null
+          proxy_password?: string | null
+          proxy_port?: number
+          proxy_username?: string | null
+          status?: string | null
+          test_result?: string | null
+          updated_at?: string | null
+          used_by_account_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "instagram_proxies_used_by_account_id_fkey"
+            columns: ["used_by_account_id"]
+            isOneToOne: false
+            referencedRelation: "instagram_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       photo_service_categories: {
         Row: {
           created_at: string
