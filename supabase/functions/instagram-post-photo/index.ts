@@ -132,12 +132,20 @@ serve(async (req) => {
     let imageBytes: Uint8Array;
     
     if (imageUrl) {
-      console.log('Downloading image from URL:', imageUrl);
-      // Download with browser-like headers to avoid blocks
-      const imageResponse = await fetch(imageUrl, {
+      // Force JPEG format for Unsplash and similar services that return WebP
+      let finalUrl = imageUrl;
+      if (imageUrl.includes('unsplash.com')) {
+        // Remove auto=format and add fm=jpg to force JPEG
+        finalUrl = imageUrl.replace(/auto=format[^&]*/g, '').replace(/&&/g, '&');
+        finalUrl = finalUrl + (finalUrl.includes('?') ? '&' : '?') + 'fm=jpg';
+      }
+      
+      console.log('Downloading image from URL:', finalUrl);
+      // Download with browser-like headers requesting JPEG specifically
+      const imageResponse = await fetch(finalUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+          'Accept': 'image/jpeg,image/png,image/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.9',
           'Referer': imageUrl,
         }
