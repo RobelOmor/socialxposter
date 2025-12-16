@@ -438,26 +438,42 @@ export default function InstagramManage() {
 
   // Bulk delete selected accounts
   const handleBulkDelete = async () => {
-    if (selectedAccounts.size === 0) return;
+    if (selectedAccounts.size === 0 || !user) return;
 
     setBulkDeleting(true);
+    const accountIds = Array.from(selectedAccounts);
+    let successCount = 0;
+    let failCount = 0;
 
-    try {
+    // Delete in smaller batches to avoid request size limits
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < accountIds.length; i += BATCH_SIZE) {
+      const batch = accountIds.slice(i, i + BATCH_SIZE);
+      
       const { error } = await supabase
         .from('instagram_accounts')
         .delete()
-        .in('id', Array.from(selectedAccounts));
+        .eq('user_id', user.id)
+        .in('id', batch);
 
-      if (error) throw error;
-
-      toast.success(`${selectedAccounts.size} account(s) removed successfully`);
-      setSelectedAccounts(new Set());
-      setDeleteConfirmOpen(false);
-      fetchAccounts();
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to delete accounts');
+      if (error) {
+        failCount += batch.length;
+        console.error('Bulk delete error:', error);
+      } else {
+        successCount += batch.length;
+      }
     }
 
+    if (failCount > 0) {
+      toast.error(`Failed to remove ${failCount} account(s)`);
+    }
+    if (successCount > 0) {
+      toast.success(`${successCount} account(s) removed successfully`);
+    }
+    
+    setSelectedAccounts(new Set());
+    setDeleteConfirmOpen(false);
+    fetchAccounts();
     setBulkDeleting(false);
   };
 
