@@ -445,7 +445,7 @@ serve(async (req) => {
           {
             method: "POST",
             headers: uploadHeaders,
-            body: imageBytes.buffer,
+            body: new Blob([imageBytes as any], { type: "image/jpeg" }),
           },
           proxyClient!,
         );
