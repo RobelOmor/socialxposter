@@ -53,6 +53,10 @@ async function normalizeImageForInstagram(
   return { bytes, width: out.width, height: out.height };
 }
 
+// Safety limits configuration
+const DAILY_POST_LIMIT = 3;
+const COOLDOWN_MINUTES = 30;
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -73,7 +77,7 @@ serve(async (req) => {
       );
     }
 
-    const { accountId, imageData, imageUrl } = await req.json();
+    const { accountId, imageData, imageUrl, skipLimits } = await req.json();
     
     if (!accountId) {
       return new Response(
@@ -89,7 +93,7 @@ serve(async (req) => {
       );
     }
 
-    // Get account
+    // Get account with safety tracking fields
     const { data: account, error: accountError } = await supabaseClient
       .from('instagram_accounts')
       .select('*')
@@ -109,6 +113,53 @@ serve(async (req) => {
         JSON.stringify({ success: false, error: 'Account session is expired' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
+    }
+
+    // Safety checks (unless skipped for admin/testing)
+    if (!skipLimits) {
+      const now = new Date();
+      const today = now.toISOString().split('T')[0];
+      
+      // Check cooldown (30 minutes)
+      if (account.last_posted_at) {
+        const lastPosted = new Date(account.last_posted_at);
+        const minutesSinceLastPost = (now.getTime() - lastPosted.getTime()) / (1000 * 60);
+        
+        if (minutesSinceLastPost < COOLDOWN_MINUTES) {
+          const remainingMinutes = Math.ceil(COOLDOWN_MINUTES - minutesSinceLastPost);
+          return new Response(
+            JSON.stringify({ 
+              success: false, 
+              error: `Cooldown active. Wait ${remainingMinutes} minutes.`,
+              reason: 'cooldown',
+              cooldown_remaining: remainingMinutes
+            }),
+            { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+      }
+
+      // Check daily limit
+      let postsToday = account.posts_today || 0;
+      const postsTodayDate = account.posts_today_date;
+      
+      // Reset counter if it's a new day
+      if (postsTodayDate !== today) {
+        postsToday = 0;
+      }
+
+      if (postsToday >= DAILY_POST_LIMIT) {
+        return new Response(
+          JSON.stringify({ 
+            success: false, 
+            error: `Daily limit reached (${DAILY_POST_LIMIT}/day). Try again tomorrow.`,
+            reason: 'daily_limit',
+            posts_today: postsToday,
+            daily_limit: DAILY_POST_LIMIT
+          }),
+          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     console.log('Posting photo to account:', account.username);
@@ -304,16 +355,32 @@ serve(async (req) => {
     console.log('Configure response:', JSON.stringify(configureResult).substring(0, 500));
 
     if (configureResult.status === 'ok' && configureResult.media) {
-      // Update posts count
+      // Update posts count and safety tracking
+      const now = new Date();
+      const today = now.toISOString().split('T')[0];
+      
+      // Calculate new posts_today
+      let newPostsToday = 1;
+      if (account.posts_today_date === today) {
+        newPostsToday = (account.posts_today || 0) + 1;
+      }
+
       await supabaseClient
         .from('instagram_accounts')
-        .update({ posts_count: (account.posts_count || 0) + 1 })
+        .update({ 
+          posts_count: (account.posts_count || 0) + 1,
+          last_posted_at: now.toISOString(),
+          posts_today: newPostsToday,
+          posts_today_date: today
+        })
         .eq('id', accountId);
 
       return new Response(
         JSON.stringify({ 
           success: true, 
-          mediaId: configureResult.media.id 
+          mediaId: configureResult.media.id,
+          posts_today: newPostsToday,
+          daily_limit: DAILY_POST_LIMIT
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );

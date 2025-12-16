@@ -40,7 +40,9 @@ import {
   Download,
   Pencil,
   Globe,
-  AlertTriangle
+  AlertTriangle,
+  Clock,
+  Server
 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -65,6 +67,17 @@ interface InstagramAccount {
   created_at: string | null;
   batch_id: string | null;
   bio: string | null;
+  last_posted_at: string | null;
+  posts_today: number | null;
+  posts_today_date: string | null;
+}
+
+interface InstagramProxy {
+  id: string;
+  proxy_host: string;
+  proxy_port: number;
+  status: string | null;
+  used_by_account_id: string | null;
 }
 
 interface AccountBatch {
@@ -79,6 +92,40 @@ const isToday = (dateString: string | null): boolean => {
   const date = new Date(dateString);
   const today = new Date();
   return date.toDateString() === today.toDateString();
+};
+
+// Safety limit constants (must match Edge Function)
+const DAILY_POST_LIMIT = 3;
+const COOLDOWN_MINUTES = 30;
+
+// Check if account is in cooldown
+const getAccountCooldown = (account: InstagramAccount): { inCooldown: boolean; remainingMinutes: number } => {
+  if (!account.last_posted_at) return { inCooldown: false, remainingMinutes: 0 };
+  
+  const lastPosted = new Date(account.last_posted_at);
+  const now = new Date();
+  const minutesSinceLastPost = (now.getTime() - lastPosted.getTime()) / (1000 * 60);
+  
+  if (minutesSinceLastPost < COOLDOWN_MINUTES) {
+    return { inCooldown: true, remainingMinutes: Math.ceil(COOLDOWN_MINUTES - minutesSinceLastPost) };
+  }
+  return { inCooldown: false, remainingMinutes: 0 };
+};
+
+// Get remaining posts today for account
+const getAccountDailyRemaining = (account: InstagramAccount): number => {
+  const today = new Date().toISOString().split('T')[0];
+  if (account.posts_today_date !== today) return DAILY_POST_LIMIT;
+  return Math.max(0, DAILY_POST_LIMIT - (account.posts_today || 0));
+};
+
+// Check if account can post
+const canAccountPost = (account: InstagramAccount): boolean => {
+  if (account.status !== 'active') return false;
+  const cooldown = getAccountCooldown(account);
+  if (cooldown.inCooldown) return false;
+  if (getAccountDailyRemaining(account) <= 0) return false;
+  return true;
 };
 
 type SupabaseFunctionInvokeError = {
@@ -184,6 +231,7 @@ export default function InstagramManage() {
 
   // Proxy management state
   const [proxyModalOpen, setProxyModalOpen] = useState(false);
+  const [accountProxies, setAccountProxies] = useState<Map<string, InstagramProxy>>(new Map());
 
   // Link to Post state
   const [linkPostOpen, setLinkPostOpen] = useState(false);
@@ -202,6 +250,7 @@ export default function InstagramManage() {
     if (user) {
       fetchAccounts();
       fetchBatches();
+      fetchAccountProxies();
     }
   }, [user]);
 
@@ -220,6 +269,25 @@ export default function InstagramManage() {
       setAccounts((data || []) as InstagramAccount[]);
     }
     setLoading(false);
+  };
+
+  // Fetch proxies to map which account uses which proxy
+  const fetchAccountProxies = async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from('instagram_proxies')
+      .select('id, proxy_host, proxy_port, status, used_by_account_id')
+      .eq('user_id', user.id);
+    
+    if (data) {
+      const proxyMap = new Map<string, InstagramProxy>();
+      data.forEach(proxy => {
+        if (proxy.used_by_account_id) {
+          proxyMap.set(proxy.used_by_account_id, proxy as InstagramProxy);
+        }
+      });
+      setAccountProxies(proxyMap);
+    }
   };
 
   const fetchBatches = async () => {
@@ -649,13 +717,19 @@ export default function InstagramManage() {
     setLinkPostProgress(0);
     setLinkPostReport(null);
 
-    const selectedAccountsList = accounts.filter(a => selectedAccounts.has(a.id) && a.status === 'active');
-    const totalAccounts = selectedAccountsList.length;
+    // Filter accounts: active + can post (not in cooldown + has daily remaining)
+    const allSelected = accounts.filter(a => selectedAccounts.has(a.id));
+    const eligibleAccounts = allSelected.filter(a => canAccountPost(a));
+    const skippedAccounts = allSelected.filter(a => !canAccountPost(a));
     
-    if (totalAccounts === 0) {
-      toast.error('No active accounts selected');
+    if (eligibleAccounts.length === 0) {
+      toast.error('No eligible accounts (check daily limits & cooldowns)');
       setLinkPosting(false);
       return;
+    }
+
+    if (skippedAccounts.length > 0) {
+      toast.warning(`${skippedAccounts.length} accounts skipped (limit/cooldown)`);
     }
 
     const details: { username: string; status: 'success' | 'failed'; error?: string }[] = [];
@@ -663,7 +737,13 @@ export default function InstagramManage() {
     let failedCount = 0;
     let completedCount = 0;
 
-    const CONCURRENT_THREADS = 10;
+    // Reduced concurrent threads to be safer
+    const CONCURRENT_THREADS = 3;
+    
+    // Random delay helper (30-90 seconds between batches)
+    const randomDelay = () => new Promise(resolve => 
+      setTimeout(resolve, Math.floor(Math.random() * 60000) + 30000)
+    );
 
     // Process a single task
     const processTask = async (account: InstagramAccount) => {
@@ -696,9 +776,11 @@ export default function InstagramManage() {
       }
     };
 
-    // Process tasks in batches concurrently
-    for (let i = 0; i < selectedAccountsList.length; i += CONCURRENT_THREADS) {
-      const batch = selectedAccountsList.slice(i, i + CONCURRENT_THREADS);
+    // Process tasks in batches concurrently with delays
+    const totalToProcess = eligibleAccounts.length;
+    
+    for (let i = 0; i < eligibleAccounts.length; i += CONCURRENT_THREADS) {
+      const batch = eligibleAccounts.slice(i, i + CONCURRENT_THREADS);
       
       const results = await Promise.all(batch.map(processTask));
       
@@ -716,17 +798,34 @@ export default function InstagramManage() {
         });
       }
 
-      setLinkPostProgress(Math.round((completedCount / totalAccounts) * 100));
+      setLinkPostProgress(Math.round((completedCount / totalToProcess) * 100));
+      
+      // Add random delay between batches (30-90 seconds) if more batches remain
+      if (i + CONCURRENT_THREADS < eligibleAccounts.length) {
+        await randomDelay();
+      }
+    }
+
+    // Add skipped accounts to report
+    for (const acc of skippedAccounts) {
+      details.push({
+        username: acc.username,
+        status: 'failed',
+        error: acc.status !== 'active' ? 'Account not active' : 
+               getAccountCooldown(acc).inCooldown ? 'In cooldown' : 'Daily limit reached'
+      });
+      failedCount++;
     }
 
     setLinkPostReport({
       success: successCount,
       failed: failedCount,
-      total: totalAccounts,
+      total: totalToProcess + skippedAccounts.length,
       details
     });
 
     await fetchAccounts();
+    await fetchAccountProxies();
     
     setLinkPosting(false);
     toast.success(`Link post complete: ${successCount} success, ${failedCount} failed`);
@@ -1315,6 +1414,7 @@ export default function InstagramManage() {
                       <TableHead className="text-center">Followers</TableHead>
                       <TableHead className="text-center">Following</TableHead>
                       <TableHead>Bio</TableHead>
+                      <TableHead className="text-center">Daily/Proxy</TableHead>
                       <TableHead className="text-center">Submitted</TableHead>
                       <TableHead className="text-center">Status</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
@@ -1370,6 +1470,45 @@ export default function InstagramManage() {
                               <span className="text-muted-foreground/50 italic">no_bio_set</span>
                             )}
                           </button>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {(() => {
+                            const cooldown = getAccountCooldown(account);
+                            const dailyRemaining = getAccountDailyRemaining(account);
+                            const proxy = accountProxies.get(account.id);
+                            
+                            return (
+                              <div className="space-y-1">
+                                {/* Daily limit */}
+                                <div className="flex items-center justify-center gap-1">
+                                  <span className={`text-xs font-medium ${
+                                    dailyRemaining === 0 ? 'text-red-500' : 
+                                    dailyRemaining === 1 ? 'text-yellow-500' : 'text-green-500'
+                                  }`}>
+                                    {dailyRemaining}/{DAILY_POST_LIMIT}
+                                  </span>
+                                </div>
+                                
+                                {/* Cooldown indicator */}
+                                {cooldown.inCooldown && (
+                                  <Badge variant="outline" className="text-xs bg-yellow-500/10 text-yellow-500 border-yellow-500/30">
+                                    <Clock className="h-3 w-3 mr-1" />
+                                    {cooldown.remainingMinutes}m
+                                  </Badge>
+                                )}
+                                
+                                {/* Proxy indicator */}
+                                {proxy && (
+                                  <div className="flex items-center justify-center gap-1">
+                                    <Server className="h-3 w-3 text-blue-400" />
+                                    <span className="text-xs text-blue-400 truncate max-w-[80px]" title={`${proxy.proxy_host}:${proxy.proxy_port}`}>
+                                      {proxy.proxy_host.split('.').slice(-2).join('.')}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </TableCell>
                         <TableCell className="text-center">
                           <span className="text-sm text-muted-foreground">
