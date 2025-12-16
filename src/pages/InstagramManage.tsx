@@ -264,13 +264,23 @@ export default function InstagramManage() {
       if (error) throw error;
 
       if (data.success) {
-        // Check if account is suspended
-        if (data.instagram_response?.is_suspended) {
-          console.log('=== SUSPEND DETECTED for', account.username, '===');
+        const status = (data as any)?.status as string | undefined;
+        const vpsError = (data as any)?.vps_response?.error as string | undefined;
+        const proxyUsed = (data as any)?.vps_response?.proxy_used as boolean | undefined;
+
+        if (status === 'active') {
+          toast.success(proxyUsed ? 'Account refreshed (proxy used)!' : 'Account refreshed!', { id: 'refresh' });
+        } else if (status === 'suspended') {
           toast.error('Account is SUSPENDED!', { id: 'refresh' });
+        } else if (status === 'expired') {
+          toast.error(vpsError ? `Expired: ${vpsError}` : 'Session expired', {
+            id: 'refresh',
+            duration: 6000,
+          });
         } else {
           toast.success('Account refreshed!', { id: 'refresh' });
         }
+
         fetchAccounts();
       } else {
         toast.error(data.error || 'Failed to refresh', { id: 'refresh' });
