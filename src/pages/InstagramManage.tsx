@@ -214,8 +214,9 @@ export default function InstagramManage() {
     success: number;
     failed: number;
     total: number;
-    details: { username: string; status: 'success' | 'failed'; error?: string }[];
+    details: { username: string; status: 'success' | 'failed'; error?: string; photoUrl?: string }[];
   } | null>(null);
+  const [bulkPostLogsOpen, setBulkPostLogsOpen] = useState(false);
 
   // Bio edit state
   const [bioEditOpen, setBioEditOpen] = useState(false);
@@ -873,7 +874,7 @@ export default function InstagramManage() {
       toast.warning(`Only ${photoItems.length} photos available. Some accounts won't receive photos.`);
     }
 
-    const details: { username: string; status: 'success' | 'failed'; error?: string }[] = [];
+    const details: { username: string; status: 'success' | 'failed'; error?: string; photoUrl?: string }[] = [];
     let successCount = 0;
     let failedCount = 0;
     let completedCount = 0;
@@ -905,6 +906,7 @@ export default function InstagramManage() {
             status: 'failed' as const,
             error: getEdgeFunctionErrorMessage(error, data),
             photoItemId: null,
+            photoUrl: photoItem.photo_url,
           };
         }
 
@@ -912,6 +914,7 @@ export default function InstagramManage() {
           username: account.username,
           status: 'success' as const,
           photoItemId: photoItem.id,
+          photoUrl: photoItem.photo_url,
         };
       } catch (err: unknown) {
         return {
@@ -919,6 +922,7 @@ export default function InstagramManage() {
           status: 'failed' as const,
           error: getEdgeFunctionErrorMessage(err),
           photoItemId: null,
+          photoUrl: photoItem.photo_url,
         };
       }
     };
@@ -946,7 +950,8 @@ export default function InstagramManage() {
         details.push({ 
           username: result.username, 
           status: result.status, 
-          error: result.error 
+          error: result.error,
+          photoUrl: result.photoUrl
         });
       }
       
@@ -1873,17 +1878,113 @@ export default function InstagramManage() {
                     ))}
                   </div>
 
-                  <Button 
-                    onClick={() => {
-                      setBulkPostOpen(false);
-                      setSelectedAccounts(new Set());
-                    }}
-                    className="w-full"
-                  >
-                    Done
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button 
+                      variant="outline"
+                      onClick={() => setBulkPostLogsOpen(true)}
+                      className="flex-1"
+                    >
+                      <Layers className="h-4 w-4 mr-2" />
+                      Logs
+                    </Button>
+                    <Button 
+                      onClick={() => {
+                        setBulkPostOpen(false);
+                        setSelectedAccounts(new Set());
+                      }}
+                      className="flex-1"
+                    >
+                      Done
+                    </Button>
+                  </div>
                 </div>
               )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Bulk Photo Post Logs Dialog */}
+        <Dialog open={bulkPostLogsOpen} onOpenChange={setBulkPostLogsOpen}>
+          <DialogContent className="sm:max-w-2xl max-h-[80vh]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Layers className="h-5 w-5" />
+                Photo Post Logs
+              </DialogTitle>
+              <DialogDescription>
+                Image URLs used for each account ({bulkPostReport?.details.length || 0} total)
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              {/* Filter tabs */}
+              <div className="flex gap-2">
+                <Badge variant="outline" className="bg-muted">
+                  All: {bulkPostReport?.details.length || 0}
+                </Badge>
+                <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/30">
+                  Success: {bulkPostReport?.details.filter(d => d.status === 'success').length || 0}
+                </Badge>
+                <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/30">
+                  Failed: {bulkPostReport?.details.filter(d => d.status === 'failed').length || 0}
+                </Badge>
+              </div>
+
+              {/* Logs list */}
+              <div className="max-h-96 overflow-y-auto space-y-2">
+                {bulkPostReport?.details.map((detail, idx) => (
+                  <div 
+                    key={idx}
+                    className={`p-3 rounded-lg text-sm border ${
+                      detail.status === 'success' 
+                        ? 'bg-green-500/5 border-green-500/20' 
+                        : 'bg-red-500/5 border-red-500/20'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium">@{detail.username}</span>
+                      {detail.status === 'success' ? (
+                        <Badge className="bg-green-500/20 text-green-500">Success</Badge>
+                      ) : (
+                        <Badge className="bg-red-500/20 text-red-500">Failed</Badge>
+                      )}
+                    </div>
+                    
+                    {detail.photoUrl && (
+                      <div className="mt-2 space-y-1">
+                        <p className="text-xs text-muted-foreground">Image URL:</p>
+                        <div className="flex items-center gap-2">
+                          <code className="text-xs bg-muted p-1 rounded flex-1 truncate">
+                            {detail.photoUrl}
+                          </code>
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => {
+                              navigator.clipboard.writeText(detail.photoUrl || '');
+                              toast.success('URL copied!');
+                            }}
+                          >
+                            Copy
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {detail.error && (
+                      <div className="mt-2">
+                        <p className="text-xs text-red-400">{detail.error}</p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <Button 
+                onClick={() => setBulkPostLogsOpen(false)}
+                className="w-full"
+              >
+                Close
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
