@@ -1366,7 +1366,13 @@ export default function InstagramManage() {
               <Globe className="h-4 w-4" />
               Add Proxy
               {totalCount > 0 && (
-                <Badge variant="secondary" className="ml-1">{availableCount}/{totalCount}</Badge>
+                <Badge variant="secondary" className="ml-1">
+                  <span className="text-green-400">{availableCount}</span>
+                  <span className="text-muted-foreground mx-0.5">&gt;</span>
+                  <span className="text-orange-400">{totalCount - availableCount}</span>
+                  <span className="text-muted-foreground mx-0.5">&lt;</span>
+                  <span>{totalCount}</span>
+                </Badge>
               )}
             </Button>
             
