@@ -149,10 +149,10 @@ serve(async (req) => {
 
     vpsBaseUrl = vpsBaseUrl.replace(/\/$/, '');
 
-    // Build proxy string for VPS
+    // Build proxy string in ip:port:user:pass format
     const proxyString = availableProxy.proxy_username && availableProxy.proxy_password
-      ? `socks5://${availableProxy.proxy_username}:${availableProxy.proxy_password}@${availableProxy.proxy_host}:${availableProxy.proxy_port}`
-      : `socks5://${availableProxy.proxy_host}:${availableProxy.proxy_port}`;
+      ? `${availableProxy.proxy_host}:${availableProxy.proxy_port}:${availableProxy.proxy_username}:${availableProxy.proxy_password}`
+      : `${availableProxy.proxy_host}:${availableProxy.proxy_port}`;
 
     console.log('Calling VPS for session validation with proxy:', vpsBaseUrl);
 
