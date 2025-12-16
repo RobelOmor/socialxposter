@@ -934,16 +934,16 @@ export default function InstagramManage() {
           <InstagramProxyManagement 
             open={proxyModalOpen} 
             onOpenChange={setProxyModalOpen}
-            onProxiesChange={fetchProxyCount}
+            onProxiesChange={refetchProxies}
           />
         </div>
 
         {/* No Proxy Warning */}
-        {proxyCount === 0 && (
+        {availableCount === 0 && (
           <Alert variant="destructive" className="border-destructive/50 bg-destructive/10">
             <AlertTriangle className="h-4 w-4" />
             <AlertDescription className="font-semibold">
-              First Add Proxy Then Start Work
+              {totalCount === 0 ? 'First Add Proxy Then Start Work' : 'No available proxy. All proxies are in use.'}
             </AlertDescription>
           </Alert>
         )}
@@ -1011,7 +1011,7 @@ export default function InstagramManage() {
                   }
                   setBatchModalOpen(true);
                 }}
-                disabled={selectedAccounts.size === 0 || proxyCount === 0}
+                disabled={selectedAccounts.size === 0 || totalCount === 0}
                 className="gap-1.5"
               >
                 <FolderPlus className="h-4 w-4" />
@@ -1022,7 +1022,7 @@ export default function InstagramManage() {
                 variant="outline"
                 size="sm"
                 onClick={handleBulkRefresh}
-                disabled={selectedAccounts.size === 0 || bulkRefreshing || proxyCount === 0}
+                disabled={selectedAccounts.size === 0 || bulkRefreshing || totalCount === 0}
                 className="gap-1.5"
               >
                 <RefreshCw className={`h-4 w-4 ${bulkRefreshing ? 'animate-spin' : ''}`} />
@@ -1039,7 +1039,7 @@ export default function InstagramManage() {
                   }
                   setDeleteConfirmOpen(true);
                 }}
-                disabled={selectedAccounts.size === 0 || proxyCount === 0}
+                disabled={selectedAccounts.size === 0 || totalCount === 0}
                 className="gap-1.5 text-destructive hover:text-destructive"
               >
                 <Trash2 className="h-4 w-4" />
@@ -1049,7 +1049,7 @@ export default function InstagramManage() {
               <Button
                 size="sm"
                 onClick={openBulkPostDialog}
-                disabled={selectedAccounts.size === 0 || proxyCount === 0}
+                disabled={selectedAccounts.size === 0 || totalCount === 0}
                 className="gap-1.5 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-white"
               >
                 <Send className="h-4 w-4" />
@@ -1069,7 +1069,7 @@ export default function InstagramManage() {
                 variant="outline"
                 size="sm"
                 onClick={handleDownloadCSV}
-                disabled={selectedAccounts.size === 0 || proxyCount === 0}
+                disabled={selectedAccounts.size === 0 || totalCount === 0}
                 className="gap-1.5"
               >
                 <Download className="h-4 w-4" />
@@ -1108,7 +1108,7 @@ export default function InstagramManage() {
                         <Checkbox
                           checked={filteredAccounts.length > 0 && selectedAccounts.size === filteredAccounts.length}
                           onCheckedChange={handleSelectAll}
-                          disabled={proxyCount === 0}
+                          disabled={totalCount === 0}
                         />
                       </TableHead>
                       <TableHead className="w-12">#</TableHead>
@@ -1130,7 +1130,7 @@ export default function InstagramManage() {
                           <Checkbox
                             checked={selectedAccounts.has(account.id)}
                             onCheckedChange={(checked) => handleSelectAccount(account.id, checked as boolean)}
-                            disabled={proxyCount === 0}
+                            disabled={totalCount === 0}
                           />
                         </TableCell>
                         <TableCell className="font-medium">{index + 1}</TableCell>
@@ -1158,14 +1158,14 @@ export default function InstagramManage() {
                         <TableCell className="text-center">{account.following_count.toLocaleString()}</TableCell>
                         <TableCell className="max-w-48">
                           <button
-                            onClick={() => proxyCount > 0 && openBioEdit(account)}
+                            onClick={() => totalCount > 0 && openBioEdit(account)}
                             className={`text-sm text-left w-full truncate transition-colors ${
-                              proxyCount === 0 
+                              totalCount === 0 
                                 ? 'cursor-not-allowed opacity-50' 
                                 : 'hover:text-primary cursor-pointer'
                             }`}
-                            title={proxyCount === 0 ? 'Add proxy first' : (account.bio || 'Click to add bio')}
-                            disabled={proxyCount === 0}
+                            title={totalCount === 0 ? 'Add proxy first' : (account.bio || 'Click to add bio')}
+                            disabled={totalCount === 0}
                           >
                             {account.bio ? (
                               <span className="text-muted-foreground">{account.bio}</span>
@@ -1222,7 +1222,7 @@ export default function InstagramManage() {
                               variant="outline"
                               size="sm"
                               onClick={() => openPostDialog(account)}
-                              disabled={account.status !== 'active' || proxyCount === 0}
+                              disabled={account.status !== 'active' || totalCount === 0}
                             >
                               <ImagePlus className="h-4 w-4" />
                             </Button>
@@ -1230,7 +1230,7 @@ export default function InstagramManage() {
                               variant="outline"
                               size="sm"
                               onClick={() => handleRefreshAccount(account)}
-                              disabled={proxyCount === 0}
+                              disabled={totalCount === 0}
                             >
                               <RefreshCw className="h-4 w-4" />
                             </Button>
@@ -1238,7 +1238,7 @@ export default function InstagramManage() {
                               variant="outline"
                               size="sm"
                               onClick={() => handleDeleteAccount(account)}
-                              disabled={proxyCount === 0}
+                              disabled={totalCount === 0}
                               className="text-destructive hover:text-destructive"
                             >
                               <Trash2 className="h-4 w-4" />
@@ -1254,14 +1254,6 @@ export default function InstagramManage() {
           </CardContent>
         </Card>
 
-        {/* Bulk Import Dialog */}
-        <BulkImportDialog
-          open={bulkImportOpen}
-          onOpenChange={setBulkImportOpen}
-          onComplete={fetchAccounts}
-          accountLimit={profile?.account_limit ?? null}
-          currentAccountCount={accounts.length}
-        />
 
         {/* Add to Batch Modal */}
         <Dialog open={batchModalOpen} onOpenChange={setBatchModalOpen}>
