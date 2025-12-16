@@ -103,21 +103,32 @@ serve(async (req) => {
       last_checked: new Date().toISOString(),
     };
 
-    if (vpsResult.success && vpsResult.user) {
-      const igUser = vpsResult.user;
+    const isValid = (vpsResult?.success && vpsResult?.user) || vpsResult?.valid === true;
+
+    const isSuspended =
+      vpsResult?.status === 'suspended' ||
+      vpsResult?.message === 'challenge_required' ||
+      (typeof vpsResult?.url === 'string' &&
+        vpsResult.url.includes('instagram.com/accounts/suspended/'));
+
+    if (isValid) {
+      // VPS may return either { success: true, user: {...} } or { valid: true, ...fields }
+      const igUser =
+        vpsResult?.user && typeof vpsResult.user === 'object' ? vpsResult.user : vpsResult;
+
       newStatus = 'active';
       updateData = {
         ...updateData,
-        full_name: igUser.full_name,
-        profile_pic_url: igUser.profile_pic_url,
-        posts_count: igUser.media_count || 0,
-        followers_count: igUser.follower_count || 0,
-        following_count: igUser.following_count || 0,
-        bio: igUser.biography || '',
+        full_name: igUser?.full_name ?? '',
+        profile_pic_url: igUser?.profile_pic_url ?? null,
+        posts_count: igUser?.media_count ?? igUser?.posts_count ?? 0,
+        followers_count: igUser?.follower_count ?? igUser?.followers_count ?? 0,
+        following_count: igUser?.following_count ?? 0,
+        bio: igUser?.biography ?? igUser?.bio ?? '',
         status: 'active',
       };
       console.log('Session is ACTIVE');
-    } else if (vpsResult.status === 'suspended') {
+    } else if (isSuspended) {
       console.log('=== SUSPEND DETECTED ===');
       newStatus = 'suspended';
       updateData.status = 'suspended';
