@@ -149,14 +149,9 @@ serve(async (req) => {
 
     vpsBaseUrl = vpsBaseUrl.replace(/\/$/, '');
 
-    // Build proxy string in ip:port:user:pass format
-    const proxyString = availableProxy.proxy_username && availableProxy.proxy_password
-      ? `${availableProxy.proxy_host}:${availableProxy.proxy_port}:${availableProxy.proxy_username}:${availableProxy.proxy_password}`
-      : `${availableProxy.proxy_host}:${availableProxy.proxy_port}`;
+    console.log('Calling VPS for session validation with HTTP proxy:', vpsBaseUrl);
 
-    console.log('Calling VPS for session validation with proxy:', vpsBaseUrl);
-
-    // Call VPS to validate session with proxy
+    // Call VPS to validate session with proxy (HTTP proxy, not SOCKS5)
     const vpsResponse = await fetch(`${vpsBaseUrl}/validate-session`, {
       method: 'POST',
       headers: { 
@@ -165,13 +160,12 @@ serve(async (req) => {
       },
       body: JSON.stringify({ 
         cookies: cookieString,
-        // Backward compatible field (some VPS builds expect this)
-        proxy: proxyString,
-        // Telegram-style explicit fields (recommended)
+        // Telegram-style explicit fields for HTTP proxy
         proxy_host: availableProxy.proxy_host,
         proxy_port: availableProxy.proxy_port,
         proxy_username: availableProxy.proxy_username,
         proxy_password: availableProxy.proxy_password,
+        proxy_type: 'http',  // Use HTTP proxy, not SOCKS5
       }),
     });
 

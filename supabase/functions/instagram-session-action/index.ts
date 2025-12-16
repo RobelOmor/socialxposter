@@ -103,14 +103,9 @@ serve(async (req) => {
 
     vpsBaseUrl = vpsBaseUrl.replace(/\/$/, '');
 
-    // Build proxy string in ip:port:user:pass format
-    const proxyString = assignedProxy.proxy_username && assignedProxy.proxy_password
-      ? `${assignedProxy.proxy_host}:${assignedProxy.proxy_port}:${assignedProxy.proxy_username}:${assignedProxy.proxy_password}`
-      : `${assignedProxy.proxy_host}:${assignedProxy.proxy_port}`;
-
     console.log(`Calling VPS for session validation: ${vpsBaseUrl}/validate-session`);
 
-    // Call VPS to validate session with proxy
+    // Call VPS to validate session with HTTP proxy (same as Telegram method)
     const vpsResponse = await fetch(`${vpsBaseUrl}/validate-session`, {
       method: 'POST',
       headers: { 
@@ -119,13 +114,12 @@ serve(async (req) => {
       },
       body: JSON.stringify({ 
         cookies: account.cookies,
-        // Backward compatible field (some VPS builds expect this)
-        proxy: proxyString,
-        // Telegram-style explicit fields (recommended)
+        // Telegram-style explicit fields for HTTP proxy
         proxy_host: assignedProxy.proxy_host,
         proxy_port: assignedProxy.proxy_port,
         proxy_username: assignedProxy.proxy_username,
         proxy_password: assignedProxy.proxy_password,
+        proxy_type: 'http',  // Use HTTP proxy, not SOCKS5
       }),
     });
 
