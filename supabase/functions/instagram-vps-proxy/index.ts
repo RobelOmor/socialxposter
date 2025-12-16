@@ -69,17 +69,26 @@ serve(async (req) => {
 
     // Use GET for health check, POST for other endpoints
     const isHealthCheck = endpoint === "/" || endpoint === "/health";
-    
+
     const response = await fetch(vpsUrl, {
       method: isHealthCheck ? 'GET' : 'POST',
-      headers: isHealthCheck ? {} : {
-        'Content-Type': 'application/json',
+      headers: {
+        ...(isHealthCheck ? {} : { 'Content-Type': 'application/json' }),
+        // Avoid ngrok free-tier interstitial HTML
+        'ngrok-skip-browser-warning': 'true',
       },
       body: isHealthCheck ? undefined : JSON.stringify(params),
     });
 
-    const data = await response.json();
+    const responseText = await response.text();
     console.log(`VPS Response status: ${response.status}`);
+
+    let data: unknown;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      data = { raw_response: responseText, parse_error: true };
+    }
 
     return new Response(
       JSON.stringify(data),

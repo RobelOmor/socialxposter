@@ -165,7 +165,13 @@ serve(async (req) => {
       },
       body: JSON.stringify({ 
         cookies: cookieString,
-        proxy: proxyString
+        // Backward compatible field (some VPS builds expect this)
+        proxy: proxyString,
+        // Telegram-style explicit fields (recommended)
+        proxy_host: availableProxy.proxy_host,
+        proxy_port: availableProxy.proxy_port,
+        proxy_username: availableProxy.proxy_username,
+        proxy_password: availableProxy.proxy_password,
       }),
     });
 
@@ -209,11 +215,17 @@ serve(async (req) => {
     // Check for login required / expired
     if (!isValid) {
       console.log('Session invalid or expired');
+
+      const rawError = typeof vpsResult?.error === 'string' ? vpsResult.error : undefined;
+      const isSocksMissing = rawError?.toLowerCase().includes('missing dependencies for socks') ?? false;
+
       return new Response(
         JSON.stringify({ 
           success: false, 
-          error: vpsResult?.error || 'Session expired - cookies are invalid',
-          reason: 'expired',
+          error: isSocksMissing
+            ? 'Instagram VPS-এ SOCKS support dependency নেই. VPS container এ `pip install "httpx[socks]"` (বা `socksio`) দিয়ে আবার restart/build করুন.'
+            : (rawError || 'Session expired - cookies are invalid'),
+          reason: isSocksMissing ? 'vps_proxy_dependency_missing' : 'expired',
           instagram_response: vpsResult
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
