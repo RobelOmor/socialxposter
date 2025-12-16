@@ -157,7 +157,16 @@ const getEdgeFunctionErrorMessage = (error: unknown, data?: any): string => {
   if (candidate) return candidate;
 
   const err = error as SupabaseFunctionInvokeError | null;
-  const body = err?.context?.body;
+  let body = err?.context?.body;
+
+  // Handle ReadableStream or non-string body
+  if (body && typeof body !== 'string') {
+    try {
+      body = JSON.stringify(body);
+    } catch {
+      body = String(body);
+    }
+  }
 
   if (typeof body === 'string' && body.trim()) {
     try {
