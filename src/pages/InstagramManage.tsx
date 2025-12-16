@@ -399,7 +399,7 @@ export default function InstagramManage() {
 
     try {
       const { data, error } = await supabase.functions.invoke('instagram-session-action', {
-        body: { accountId: account.id, action: 'refresh' }
+        body: { accountId: account.id, action: 'refresh', debugProxy: true }
       });
 
       console.log('=== Refresh Account Response ===');
@@ -411,25 +411,29 @@ export default function InstagramManage() {
 
       if (data.success) {
         const status = (data as any)?.status as string | undefined;
-        const vpsError = (data as any)?.vps_response?.error as string | undefined;
-        const proxyUsed = (data as any)?.vps_response?.proxy_used as boolean | undefined;
+        const proxy = (data as any)?.proxy as
+          | { enabled?: boolean; host?: string; port?: number; username?: string; ip?: string | null }
+          | undefined;
+
+        const proxyHint = proxy?.enabled
+          ? proxy.ip
+            ? `711proxy IP: ${proxy.ip}`
+            : `711proxy: ${proxy.host}:${proxy.port}`
+          : undefined;
 
         if (status === 'active') {
-          toast.success(proxyUsed ? 'Account refreshed (proxy used)!' : 'Account refreshed!', { id: 'refresh' });
+          toast.success(proxyHint ? `Account refreshed (${proxyHint})` : 'Account refreshed!', { id: 'refresh' });
         } else if (status === 'suspended') {
           toast.error('Account is SUSPENDED!', { id: 'refresh' });
         } else if (status === 'expired') {
-          toast.error(vpsError ? `Expired: ${vpsError}` : 'Session expired', {
-            id: 'refresh',
-            duration: 6000,
-          });
+          toast.error('Session expired', { id: 'refresh', duration: 6000 });
         } else {
           toast.success('Account refreshed!', { id: 'refresh' });
         }
 
         fetchAccounts();
       } else {
-        toast.error(data.error || 'Failed to refresh', { id: 'refresh' });
+        toast.error((data as any)?.error || 'Failed to refresh', { id: 'refresh' });
       }
     } catch (error: any) {
       console.log('Refresh Error:', error);
