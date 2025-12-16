@@ -22,21 +22,21 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch VPS IP from admin config (using same config as Telegram for now)
+    // Fetch Instagram VPS IP from admin config
     const { data: config, error: configError } = await supabase
       .from('telegram_admin_config')
-      .select('vps_ip')
+      .select('instagram_vps_ip')
       .single();
 
-    if (configError || !config?.vps_ip) {
-      console.error('VPS IP not configured:', configError);
+    if (configError || !config?.instagram_vps_ip) {
+      console.error('Instagram VPS IP not configured:', configError);
       return new Response(
-        JSON.stringify({ error: 'VPS IP not configured in admin panel' }),
+        JSON.stringify({ error: 'Instagram VPS IP not configured in admin panel' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    let vpsBaseUrl = config.vps_ip;
+    let vpsBaseUrl = config.instagram_vps_ip;
     
     // Handle different URL formats
     if (vpsBaseUrl.includes('.ngrok') || vpsBaseUrl.includes('ngrok-free.app')) {

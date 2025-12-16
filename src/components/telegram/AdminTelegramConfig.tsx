@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 interface TelegramConfig {
   id: string;
   vps_ip: string | null;
+  instagram_vps_ip: string | null;
   api_id: string | null;
   api_hash: string | null;
   max_sessions_per_user: number | null;
@@ -33,6 +34,7 @@ export const AdminTelegramConfig = () => {
 
   // Form state
   const [vpsIp, setVpsIp] = useState("");
+  const [instagramVpsIp, setInstagramVpsIp] = useState("");
   const [apiId, setApiId] = useState("");
   const [apiHash, setApiHash] = useState("");
   const [maxSessions, setMaxSessions] = useState("100");
@@ -57,6 +59,7 @@ export const AdminTelegramConfig = () => {
       const configData = data as TelegramConfig;
       setConfig(configData);
       setVpsIp(configData.vps_ip || "");
+      setInstagramVpsIp(configData.instagram_vps_ip || "");
       setApiId(configData.api_id || "2040");
       setApiHash(configData.api_hash || "b18441a1ff607e10a989891a5462e627");
       setMaxSessions(configData.max_sessions_per_user?.toString() || "100");
@@ -75,6 +78,7 @@ export const AdminTelegramConfig = () => {
         .from("telegram_admin_config")
         .update({
           vps_ip: vpsIp || null,
+          instagram_vps_ip: instagramVpsIp || null,
           api_id: apiId || "2040",
           api_hash: apiHash || "b18441a1ff607e10a989891a5462e627",
           max_sessions_per_user: parseInt(maxSessions) || 100,
@@ -281,9 +285,9 @@ export const AdminTelegramConfig = () => {
           <CardDescription>Configure the Python API server running on your VPS</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex gap-4 items-end">
-            <div className="flex-1">
-              <Label>VPS IP Address</Label>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>Telegram VPS IP</Label>
               <Input
                 placeholder="145.223.22.249"
                 value={vpsIp}
@@ -292,7 +296,20 @@ export const AdminTelegramConfig = () => {
                   setApiStatus("unknown");
                 }}
               />
+              <p className="text-xs text-muted-foreground mt-1">For Telegram sessions (port 8000)</p>
             </div>
+            <div>
+              <Label>Instagram VPS IP</Label>
+              <Input
+                placeholder="61b633fc5dec.ngrok-free.app"
+                value={instagramVpsIp}
+                onChange={(e) => setInstagramVpsIp(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground mt-1">For Instagram accounts (port 8001 or ngrok)</p>
+            </div>
+          </div>
+          
+          <div className="flex gap-2">
             <Button onClick={testConnection} disabled={testing} variant="outline" className="gap-2">
               {testing ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -303,7 +320,7 @@ export const AdminTelegramConfig = () => {
               ) : (
                 <RefreshCw className="h-4 w-4" />
               )}
-              Test Connection
+              Test Telegram VPS
             </Button>
           </div>
           
@@ -314,8 +331,8 @@ export const AdminTelegramConfig = () => {
                 : "bg-red-500/10 text-red-500 border border-red-500/20"
             }`}>
               {apiStatus === "online" 
-                ? `✓ VPS API is online at http://${vpsIp}:8000` 
-                : `✕ Cannot connect to http://${vpsIp}:8000`}
+                ? `✓ Telegram VPS API is online` 
+                : `✕ Cannot connect to Telegram VPS`}
             </div>
           )}
 

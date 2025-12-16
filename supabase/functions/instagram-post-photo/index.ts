@@ -73,18 +73,18 @@ serve(async (req) => {
 
     const { data: config, error: configError } = await supabaseAdmin
       .from('telegram_admin_config')
-      .select('vps_ip')
+      .select('instagram_vps_ip')
       .single();
 
-    if (configError || !config?.vps_ip) {
-      console.error('VPS IP not configured:', configError);
+    if (configError || !config?.instagram_vps_ip) {
+      console.error('Instagram VPS IP not configured:', configError);
       return new Response(
-        JSON.stringify({ success: false, error: 'VPS IP not configured in admin panel' }),
+        JSON.stringify({ success: false, error: 'Instagram VPS IP not configured in admin panel' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    let vpsBaseUrl = config.vps_ip;
+    let vpsBaseUrl = config.instagram_vps_ip;
     
     // Handle different URL formats
     if (vpsBaseUrl.includes('.ngrok') || vpsBaseUrl.includes('ngrok-free.app')) {
