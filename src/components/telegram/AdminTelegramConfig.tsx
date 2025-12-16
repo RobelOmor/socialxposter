@@ -156,7 +156,7 @@ export const AdminTelegramConfig = () => {
     try {
       const { data, error } = await supabase.functions.invoke("instagram-vps-proxy", {
         body: {
-          endpoint: "/health"
+          endpoint: "/"
         }
       });
 
