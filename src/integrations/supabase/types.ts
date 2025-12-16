@@ -313,6 +313,9 @@ export type Database = {
           is_active: boolean | null
           max_messages_per_day: number | null
           max_sessions_per_user: number | null
+          proxy_711_host: string | null
+          proxy_711_port: number | null
+          proxy_711_username: string | null
           updated_at: string
           vps_ip: string | null
         }
@@ -325,6 +328,9 @@ export type Database = {
           is_active?: boolean | null
           max_messages_per_day?: number | null
           max_sessions_per_user?: number | null
+          proxy_711_host?: string | null
+          proxy_711_port?: number | null
+          proxy_711_username?: string | null
           updated_at?: string
           vps_ip?: string | null
         }
@@ -337,6 +343,9 @@ export type Database = {
           is_active?: boolean | null
           max_messages_per_day?: number | null
           max_sessions_per_user?: number | null
+          proxy_711_host?: string | null
+          proxy_711_port?: number | null
+          proxy_711_username?: string | null
           updated_at?: string
           vps_ip?: string | null
         }
