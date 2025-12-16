@@ -6,6 +6,61 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Function to get JPEG dimensions from image bytes
+function getJpegDimensions(imageBytes: Uint8Array): { width: number; height: number } | null {
+  try {
+    // Look for SOF0 (Start of Frame) marker in JPEG
+    // JPEG markers start with 0xFF
+    for (let i = 0; i < imageBytes.length - 10; i++) {
+      // Look for SOF markers (0xFFC0-0xFFC3 are common frame markers)
+      if (imageBytes[i] === 0xFF && 
+          (imageBytes[i + 1] === 0xC0 || imageBytes[i + 1] === 0xC1 || 
+           imageBytes[i + 1] === 0xC2 || imageBytes[i + 1] === 0xC3)) {
+        // SOF marker found, dimensions are at offset +5 (height) and +7 (width)
+        const height = (imageBytes[i + 5] << 8) | imageBytes[i + 6];
+        const width = (imageBytes[i + 7] << 8) | imageBytes[i + 8];
+        if (width > 0 && height > 0) {
+          return { width, height };
+        }
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Function to crop image dimensions to Instagram-allowed aspect ratio (center crop calculation)
+function getCroppedDimensions(width: number, height: number): { 
+  cropWidth: number; 
+  cropHeight: number;
+  offsetX: number;
+  offsetY: number;
+} {
+  const aspectRatio = width / height;
+  
+  // Instagram allows aspect ratios between 0.8 (4:5 portrait) and 1.91 (landscape)
+  const MIN_RATIO = 0.8;  // 4:5 portrait
+  const MAX_RATIO = 1.91; // 1.91:1 landscape
+  
+  let cropWidth = width;
+  let cropHeight = height;
+  let offsetX = 0;
+  let offsetY = 0;
+  
+  if (aspectRatio < MIN_RATIO) {
+    // Too tall, crop top and bottom to get 4:5
+    cropHeight = Math.floor(width / MIN_RATIO);
+    offsetY = Math.floor((height - cropHeight) / 2);
+  } else if (aspectRatio > MAX_RATIO) {
+    // Too wide, crop left and right to get 1.91:1
+    cropWidth = Math.floor(height * MAX_RATIO);
+    offsetX = Math.floor((width - cropWidth) / 2);
+  }
+  
+  return { cropWidth, cropHeight, offsetX, offsetY };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -80,7 +135,6 @@ serve(async (req) => {
     }
 
     const csrfToken = cookieObj['csrftoken'] || '';
-    const dsUserId = cookieObj['ds_user_id'] || '';
 
     // Get image bytes
     let imageBytes: Uint8Array;
@@ -108,11 +162,28 @@ serve(async (req) => {
 
     console.log('Image size:', imageBytes.length, 'bytes');
 
+    // Get actual image dimensions
+    const dimensions = getJpegDimensions(imageBytes);
+    let imgWidth = 1080;
+    let imgHeight = 1080;
+    
+    if (dimensions) {
+      imgWidth = dimensions.width;
+      imgHeight = dimensions.height;
+      console.log('Detected image dimensions:', imgWidth, 'x', imgHeight);
+    } else {
+      console.log('Could not detect dimensions, using default 1080x1080');
+    }
+
+    // Calculate crop for Instagram-allowed aspect ratio
+    const { cropWidth, cropHeight, offsetX, offsetY } = getCroppedDimensions(imgWidth, imgHeight);
+    console.log('Crop dimensions:', cropWidth, 'x', cropHeight, 'offset:', offsetX, offsetY);
+
     // Generate upload ID
     const uploadId = Date.now().toString();
     const uploadName = `${uploadId}_0_${Math.floor(Math.random() * 9000000000) + 1000000000}`;
 
-    // Step 1: Upload image to Instagram
+    // Step 1: Upload image to Instagram with actual dimensions
     console.log('Step 1: Uploading image to Instagram...');
     
     const uploadHeaders = {
@@ -123,8 +194,8 @@ serve(async (req) => {
       'X-Instagram-Rupload-Params': JSON.stringify({
         'media_type': 1,
         'upload_id': uploadId,
-        'upload_media_height': 1080,
-        'upload_media_width': 1080,
+        'upload_media_height': imgHeight,
+        'upload_media_width': imgWidth,
       }),
       'X-Entity-Name': uploadName,
       'X-Entity-Length': imageBytes.length.toString(),
@@ -165,8 +236,13 @@ serve(async (req) => {
       );
     }
 
-    // Step 2: Configure/publish the photo
+    // Step 2: Configure/publish the photo with crop settings
     console.log('Step 2: Configuring/publishing photo...');
+
+    // Calculate crop center as percentage offset from center (0 = center)
+    const cropCenterX = imgWidth > 0 ? (offsetX + cropWidth / 2 - imgWidth / 2) / imgWidth : 0;
+    const cropCenterY = imgHeight > 0 ? (offsetY + cropHeight / 2 - imgHeight / 2) / imgHeight : 0;
+    const cropZoom = imgWidth > 0 ? imgWidth / cropWidth : 1;
 
     const configureData = {
       'upload_id': uploadId,
@@ -179,15 +255,17 @@ serve(async (req) => {
         'android_release': '13'
       },
       'edits': {
-        'crop_original_size': [1080.0, 1080.0],
-        'crop_center': [0.0, 0.0],
-        'crop_zoom': 1.0
+        'crop_original_size': [imgWidth, imgHeight],
+        'crop_center': [cropCenterX, cropCenterY],
+        'crop_zoom': cropZoom
       },
       'extra': {
-        'source_width': 1080,
-        'source_height': 1080
+        'source_width': imgWidth,
+        'source_height': imgHeight
       }
     };
+
+    console.log('Configure data:', JSON.stringify(configureData));
 
     const configureResponse = await fetch('https://i.instagram.com/api/v1/media/configure/', {
       method: 'POST',
