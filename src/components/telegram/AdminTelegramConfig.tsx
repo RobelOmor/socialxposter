@@ -25,9 +25,11 @@ export const AdminTelegramConfig = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [testingInstagram, setTestingInstagram] = useState(false);
   const [testingSession, setTestingSession] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [apiStatus, setApiStatus] = useState<"unknown" | "online" | "offline">("unknown");
+  const [instagramApiStatus, setInstagramApiStatus] = useState<"unknown" | "online" | "offline">("unknown");
   const [testResult, setTestResult] = useState<string>("");
   const [sessionDetails, setSessionDetails] = useState<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -134,6 +136,44 @@ export const AdminTelegramConfig = () => {
       toast.error(error.message || "Cannot connect to VPS API");
     }
     setTesting(false);
+  };
+
+  const testInstagramConnection = async () => {
+    if (!instagramVpsIp) {
+      toast.error("Enter Instagram VPS IP first");
+      return;
+    }
+
+    // First save the Instagram VPS IP
+    if (config) {
+      await supabase
+        .from("telegram_admin_config")
+        .update({ instagram_vps_ip: instagramVpsIp })
+        .eq("id", config.id);
+    }
+
+    setTestingInstagram(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("instagram-vps-proxy", {
+        body: {
+          endpoint: "/health"
+        }
+      });
+
+      if (error) throw error;
+
+      if (data?.status === "ok" || data?.success) {
+        setInstagramApiStatus("online");
+        toast.success("Instagram VPS API is online!");
+      } else {
+        setInstagramApiStatus("offline");
+        toast.error("Instagram API returned error");
+      }
+    } catch (error: any) {
+      setInstagramApiStatus("offline");
+      toast.error(error.message || "Cannot connect to Instagram VPS API");
+    }
+    setTestingInstagram(false);
   };
 
   const handleSessionUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -303,7 +343,10 @@ export const AdminTelegramConfig = () => {
               <Input
                 placeholder="61b633fc5dec.ngrok-free.app"
                 value={instagramVpsIp}
-                onChange={(e) => setInstagramVpsIp(e.target.value)}
+                onChange={(e) => {
+                  setInstagramVpsIp(e.target.value);
+                  setInstagramApiStatus("unknown");
+                }}
               />
               <p className="text-xs text-muted-foreground mt-1">For Instagram accounts (port 8001 or ngrok)</p>
             </div>
@@ -322,6 +365,19 @@ export const AdminTelegramConfig = () => {
               )}
               Test Telegram VPS
             </Button>
+            
+            <Button onClick={testInstagramConnection} disabled={testingInstagram} variant="outline" className="gap-2">
+              {testingInstagram ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : instagramApiStatus === "online" ? (
+                <Check className="h-4 w-4 text-green-500" />
+              ) : instagramApiStatus === "offline" ? (
+                <X className="h-4 w-4 text-red-500" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Test Instagram VPS
+            </Button>
           </div>
           
           {apiStatus !== "unknown" && (
@@ -333,6 +389,18 @@ export const AdminTelegramConfig = () => {
               {apiStatus === "online" 
                 ? `✓ Telegram VPS API is online` 
                 : `✕ Cannot connect to Telegram VPS`}
+            </div>
+          )}
+          
+          {instagramApiStatus !== "unknown" && (
+            <div className={`p-3 rounded-lg text-sm ${
+              instagramApiStatus === "online" 
+                ? "bg-green-500/10 text-green-500 border border-green-500/20" 
+                : "bg-red-500/10 text-red-500 border border-red-500/20"
+            }`}>
+              {instagramApiStatus === "online" 
+                ? `✓ Instagram VPS API is online` 
+                : `✕ Cannot connect to Instagram VPS`}
             </div>
           )}
 
