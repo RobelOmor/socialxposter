@@ -136,6 +136,14 @@ type SupabaseFunctionInvokeError = {
   };
 };
 
+const getInvokeErrorMeta = (error: unknown): { status?: number; body?: string } => {
+  const err = error as SupabaseFunctionInvokeError | null;
+  return {
+    status: err?.context?.status,
+    body: err?.context?.body,
+  };
+};
+
 const getEdgeFunctionErrorMessage = (error: unknown, data?: any): string => {
   const candidate =
     (data?.error && String(data.error)) ||
@@ -172,7 +180,13 @@ const getEdgeFunctionErrorMessage = (error: unknown, data?: any): string => {
     }
   }
 
-  return (err?.message && String(err.message)) || 'Unknown error';
+  const status = err?.context?.status;
+  const msg = (err?.message && String(err.message)) || 'Unknown error';
+  if (msg.toLowerCase().includes('non-2xx')) {
+    return status ? `Server error (HTTP ${status}). Details Edge Function logs e thakbe.` : 'Server error. Details Edge Function logs e thakbe.';
+  }
+
+  return status ? `${msg} (HTTP ${status})` : msg;
 };
 
 export default function InstagramManage() {
@@ -214,7 +228,14 @@ export default function InstagramManage() {
     success: number;
     failed: number;
     total: number;
-    details: { username: string; status: 'success' | 'failed'; error?: string; photoUrl?: string }[];
+    details: {
+      username: string;
+      status: 'success' | 'failed';
+      error?: string;
+      photoUrl?: string;
+      statusCode?: number;
+      errorBody?: string;
+    }[];
   } | null>(null);
   const [bulkPostLogsOpen, setBulkPostLogsOpen] = useState(false);
 
@@ -874,7 +895,14 @@ export default function InstagramManage() {
       toast.warning(`Only ${photoItems.length} photos available. Some accounts won't receive photos.`);
     }
 
-    const details: { username: string; status: 'success' | 'failed'; error?: string; photoUrl?: string }[] = [];
+    const details: {
+      username: string;
+      status: 'success' | 'failed';
+      error?: string;
+      photoUrl?: string;
+      statusCode?: number;
+      errorBody?: string;
+    }[] = [];
     let successCount = 0;
     let failedCount = 0;
     let completedCount = 0;
@@ -901,10 +929,13 @@ export default function InstagramManage() {
         });
 
         if (error || !data?.success) {
+          const meta = getInvokeErrorMeta(error);
           return {
             username: account.username,
             status: 'failed' as const,
             error: getEdgeFunctionErrorMessage(error, data),
+            statusCode: meta.status,
+            errorBody: meta.body,
             photoItemId: null,
             photoUrl: photoItem.photo_url,
           };
@@ -913,14 +944,19 @@ export default function InstagramManage() {
         return {
           username: account.username,
           status: 'success' as const,
+          statusCode: undefined,
+          errorBody: undefined,
           photoItemId: photoItem.id,
           photoUrl: photoItem.photo_url,
         };
       } catch (err: unknown) {
+        const meta = getInvokeErrorMeta(err);
         return {
           username: account.username,
           status: 'failed' as const,
           error: getEdgeFunctionErrorMessage(err),
+          statusCode: meta.status,
+          errorBody: meta.body,
           photoItemId: null,
           photoUrl: photoItem.photo_url,
         };
@@ -951,7 +987,9 @@ export default function InstagramManage() {
           username: result.username, 
           status: result.status, 
           error: result.error,
-          photoUrl: result.photoUrl
+          photoUrl: result.photoUrl,
+          statusCode: result.statusCode,
+          errorBody: result.errorBody,
         });
       }
       
@@ -1917,7 +1955,7 @@ export default function InstagramManage() {
             </DialogHeader>
             <div className="space-y-4 py-4">
               {/* Filter tabs */}
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Badge variant="outline" className="bg-muted">
                   All: {bulkPostReport?.details.length || 0}
                 </Badge>
@@ -1948,6 +1986,16 @@ export default function InstagramManage() {
                         <Badge className="bg-red-500/20 text-red-500">Failed</Badge>
                       )}
                     </div>
+
+                    {(detail.statusCode || detail.error) && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        {typeof detail.statusCode === 'number' && (
+                          <Badge variant="outline" className="bg-muted">
+                            HTTP {detail.statusCode}
+                          </Badge>
+                        )}
+                      </div>
+                    )}
                     
                     {detail.photoUrl && (
                       <div className="mt-2 space-y-1">
@@ -1971,20 +2019,40 @@ export default function InstagramManage() {
                     )}
                     
                     {detail.error && (
-                      <div className="mt-2">
-                        <p className="text-xs text-red-400">{detail.error}</p>
+                      <div className="mt-2 space-y-2">
+                        <p className="text-xs text-destructive">{detail.error}</p>
+
+                        {detail.errorBody && (
+                          <details className="rounded-md border border-border bg-muted/40 p-2">
+                            <summary className="cursor-pointer text-xs text-muted-foreground">
+                              Details
+                            </summary>
+                            <pre className="mt-2 whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                              {detail.errorBody}
+                            </pre>
+                          </details>
+                        )}
                       </div>
                     )}
                   </div>
                 ))}
               </div>
 
-              <Button 
-                onClick={() => setBulkPostLogsOpen(false)}
-                className="w-full"
-              >
-                Close
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => window.open('https://supabase.com/dashboard/project/iilyhckcapcsoidabspp/functions/instagram-post-photo/logs', '_blank', 'noopener,noreferrer')}
+                  className="flex-1"
+                >
+                  Open Edge Logs
+                </Button>
+                <Button 
+                  onClick={() => setBulkPostLogsOpen(false)}
+                  className="flex-1"
+                >
+                  Close
+                </Button>
+              </div>
             </div>
           </DialogContent>
         </Dialog>
