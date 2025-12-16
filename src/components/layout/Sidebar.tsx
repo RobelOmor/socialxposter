@@ -9,7 +9,8 @@ import {
   Zap,
   Shield,
   X,
-  MessageSquare
+  MessageSquare,
+  Activity
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -34,6 +35,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
   const socialItems = [
     { icon: Instagram, label: 'Instagram Manage', path: '/instagram-manage' },
+    { icon: Activity, label: 'Instagram Monitoring', path: '/instagram-monitoring' },
     { icon: MessageSquare, label: 'Telegram Manage', path: '/telegram-manage' },
   ];
 
