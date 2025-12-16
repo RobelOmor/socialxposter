@@ -113,7 +113,10 @@ serve(async (req) => {
     // Call VPS to validate session with proxy
     const vpsResponse = await fetch(`${vpsBaseUrl}/validate-session`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true'
+      },
       body: JSON.stringify({ 
         cookies: account.cookies,
         proxy: proxyString
