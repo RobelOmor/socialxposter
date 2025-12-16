@@ -119,12 +119,31 @@ serve(async (req) => {
       },
       body: JSON.stringify({ 
         cookies: account.cookies,
-        proxy: proxyString
+        // Backward compatible field (some VPS builds expect this)
+        proxy: proxyString,
+        // Telegram-style explicit fields (recommended)
+        proxy_host: assignedProxy.proxy_host,
+        proxy_port: assignedProxy.proxy_port,
+        proxy_username: assignedProxy.proxy_username,
+        proxy_password: assignedProxy.proxy_password,
       }),
     });
 
     const vpsResult = await vpsResponse.json();
     console.log('VPS Response:', JSON.stringify(vpsResult));
+
+    // If VPS cannot use SOCKS proxy, do NOT mark account as expired.
+    if (typeof vpsResult?.error === 'string' && vpsResult.error.toLowerCase().includes('missing dependencies for socks')) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Instagram VPS-এ SOCKS support dependency নেই. VPS container এ `pip install "httpx[socks]"` (বা `socksio`) দিয়ে আবার restart/build করুন.',
+          reason: 'vps_proxy_dependency_missing',
+          vps_response: vpsResult,
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     let newStatus: 'active' | 'expired' | 'suspended' = 'expired';
     let updateData: any = {

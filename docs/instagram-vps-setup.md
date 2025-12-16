@@ -334,7 +334,8 @@ if __name__ == "__main__":
 ```
 fastapi==0.104.1
 uvicorn==0.24.0
-httpx==0.25.2
+# SOCKS5 proxy support (prevents: "Missing dependencies for SOCKS support")
+httpx[socks]==0.25.2
 pydantic==2.5.2
 ```
 
