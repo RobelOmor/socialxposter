@@ -25,9 +25,9 @@ async function proxiedFetch(
   return await fetch(url, { ...(options as any), client: proxyClient } as any);
 }
 
-// Auto-retry configuration
-const MAX_RETRIES = 3;
-const RETRY_DELAYS = [1000, 2000, 4000]; // Exponential backoff in ms
+// High Success Mode: Auto-retry configuration with more attempts
+const MAX_RETRIES = 5;
+const RETRY_DELAYS = [1000, 2000, 3000, 5000, 8000]; // Exponential backoff in ms
 
 // Retry helper with exponential backoff
 async function withRetry<T>(
@@ -58,7 +58,7 @@ async function withRetry<T>(
   throw lastError;
 }
 
-// Check if error is retryable (network/timeout issues)
+// Check if error is retryable (network/timeout/connection issues)
 function isRetryableError(error: any): boolean {
   const message = String(error?.message || error || "").toLowerCase();
   return (
@@ -67,7 +67,10 @@ function isRetryableError(error: any): boolean {
     message.includes("econnreset") ||
     message.includes("econnrefused") ||
     message.includes("socket") ||
-    message.includes("fetch failed")
+    message.includes("fetch failed") ||
+    message.includes("connection reset") ||
+    message.includes("connection error") ||
+    message.includes("sendrequest")
   );
 }
 
@@ -453,17 +456,10 @@ serve(async (req) => {
     let imageBytes: Uint8Array;
 
     if (imageUrl) {
-      // Force JPEG format for Unsplash and similar services that return WebP
-      let finalUrl = imageUrl;
-      if (imageUrl.includes("unsplash.com")) {
-        // Remove auto=format and add fm=jpg to force JPEG
-        finalUrl = imageUrl
-          .replace(/auto=format[^&]*/g, "")
-          .replace(/&&/g, "&");
-        finalUrl = finalUrl + (finalUrl.includes("?") ? "&" : "?") + "fm=jpg";
-      }
-
-      console.log("Downloading image from URL:", finalUrl);
+      // HIGH SUCCESS MODE: Auto-resize images from known providers to reduce memory usage
+      const finalUrl = optimizeRemoteImageUrl(imageUrl);
+      console.log("Downloading image from optimized URL:", finalUrl);
+      
       // Download with browser-like headers requesting JPEG specifically (using regular fetch)
       const imageResponse = await fetch(finalUrl, {
         headers: {
@@ -547,33 +543,55 @@ serve(async (req) => {
 
     // Generate upload ID
     const uploadId = Date.now().toString();
-    const uploadName = `${uploadId}_0_${Math.floor(Math.random() * 9000000000) + 1000000000}`;
 
-    // Step 1: Upload image to Instagram with actual dimensions using 711proxy
-    console.log("Step 1: Uploading image to Instagram via 711proxy...");
+    // HIGH SUCCESS MODE: Upload with proxy session fallback
+    // Each retry uses a different proxy session key for fresh IP
+    console.log("Step 1: Uploading image to Instagram via 711proxy with session fallback...");
 
-    const uploadHeaders = {
-      Cookie: cookieString,
-      "User-Agent":
-        "Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229237)",
-      "X-IG-App-ID": "936619743392459",
-      "X-CSRFToken": csrfToken,
-      "X-Instagram-Rupload-Params": JSON.stringify({
-        media_type: 1,
-        upload_id: uploadId,
-        upload_media_height: imgHeight,
-        upload_media_width: imgWidth,
-      }),
-      "X-Entity-Name": uploadName,
-      "X-Entity-Length": imageBytes.length.toString(),
-      "X-Entity-Type": "image/jpeg",
-      "Content-Type": "application/octet-stream",
-      Offset: "0",
-    };
+    let uploadResult: any = null;
+    let lastUploadError: any = null;
 
-    // Upload with retry using proxied fetch
-    const uploadResult = await withRetry(
-      async () => {
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        // Generate new upload name for each attempt
+        const uploadName = `${uploadId}_0_${Math.floor(Math.random() * 9000000000) + 1000000000}`;
+        
+        // Rotate proxy session on retry (fresh IP from pool)
+        const retrySessionKey = attempt === 0 
+          ? sessionKey 
+          : `${sessionKey}${String(attempt).padStart(2, '0')}`;
+        const retryProxyUsername = `${proxyBaseUsername}-session-${retrySessionKey}`;
+        const retryProxyUrl = `http://${encodeURIComponent(retryProxyUsername)}:${encodeURIComponent(proxy711Password)}@${proxyHost}:${proxyPort}`;
+        
+        // Create new proxy client for this attempt
+        const retryProxyClient = createProxyClient(retryProxyUrl);
+        if (!retryProxyClient) {
+          throw new Error("Failed to create proxy client for retry");
+        }
+
+        if (attempt > 0) {
+          console.log(`[Upload] Retry ${attempt}/${MAX_RETRIES} with new session: ${retryProxyUsername}`);
+        }
+
+        const uploadHeaders = {
+          Cookie: cookieString,
+          "User-Agent":
+            "Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229237)",
+          "X-IG-App-ID": "936619743392459",
+          "X-CSRFToken": csrfToken,
+          "X-Instagram-Rupload-Params": JSON.stringify({
+            media_type: 1,
+            upload_id: uploadId,
+            upload_media_height: imgHeight,
+            upload_media_width: imgWidth,
+          }),
+          "X-Entity-Name": uploadName,
+          "X-Entity-Length": imageBytes.length.toString(),
+          "X-Entity-Type": "image/jpeg",
+          "Content-Type": "application/octet-stream",
+          Offset: "0",
+        };
+
         const uploadResponse = await proxiedFetch(
           `https://i.instagram.com/rupload_igphoto/${uploadName}`,
           {
@@ -581,26 +599,35 @@ serve(async (req) => {
             headers: uploadHeaders,
             body: new Blob([imageBytes as any], { type: "image/jpeg" }),
           },
-          proxyClient!,
+          retryProxyClient,
         );
 
         const responseText = await uploadResponse.text();
         try {
-          return JSON.parse(responseText);
+          uploadResult = JSON.parse(responseText);
+          console.log("Upload response:", JSON.stringify(uploadResult));
+          break; // Success, exit loop
         } catch {
-          console.error(
-            "Failed to parse upload response:",
-            responseText.substring(0, 500),
-          );
-          throw new Error(
-            "Invalid response from Instagram: " + responseText.substring(0, 200),
-          );
+          console.error("Failed to parse upload response:", responseText.substring(0, 500));
+          throw new Error("Invalid response from Instagram: " + responseText.substring(0, 200));
         }
-      },
-      isRetryableError,
-      "Instagram Upload",
-    );
-    console.log("Upload response:", JSON.stringify(uploadResult));
+      } catch (error) {
+        lastUploadError = error;
+        console.error(`[Upload] Attempt ${attempt + 1} failed:`, error);
+        
+        if (attempt < MAX_RETRIES && isRetryableError(error)) {
+          const delay = RETRY_DELAYS[attempt] || RETRY_DELAYS[RETRY_DELAYS.length - 1];
+          console.log(`[Upload] Waiting ${delay}ms before retry...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        } else if (attempt >= MAX_RETRIES) {
+          throw error;
+        }
+      }
+    }
+
+    if (!uploadResult) {
+      throw lastUploadError || new Error("Upload failed after all retries");
+    }
 
     if (!uploadResult.upload_id) {
       // Check for account issues
@@ -641,8 +668,8 @@ serve(async (req) => {
       );
     }
 
-    // Step 2: Configure/publish the photo with crop settings using 711proxy
-    console.log("Step 2: Configuring/publishing photo via 711proxy...");
+    // Step 2: Configure/publish the photo with crop settings using 711proxy (with session fallback)
+    console.log("Step 2: Configuring/publishing photo via 711proxy with session fallback...");
 
     const configureData = {
       upload_id: uploadId,
@@ -667,9 +694,27 @@ serve(async (req) => {
 
     console.log("Configure data:", JSON.stringify(configureData));
 
-    // Configure with retry using proxied fetch
-    const configureResult = await withRetry(
-      async () => {
+    let configureResult: any = null;
+    let lastConfigureError: any = null;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        // Rotate proxy session on retry
+        const retrySessionKey = attempt === 0 
+          ? sessionKey 
+          : `${sessionKey}c${String(attempt).padStart(2, '0')}`;
+        const retryProxyUsername = `${proxyBaseUsername}-session-${retrySessionKey}`;
+        const retryProxyUrl = `http://${encodeURIComponent(retryProxyUsername)}:${encodeURIComponent(proxy711Password)}@${proxyHost}:${proxyPort}`;
+        
+        const retryProxyClient = createProxyClient(retryProxyUrl);
+        if (!retryProxyClient) {
+          throw new Error("Failed to create proxy client for configure retry");
+        }
+
+        if (attempt > 0) {
+          console.log(`[Configure] Retry ${attempt}/${MAX_RETRIES} with new session: ${retryProxyUsername}`);
+        }
+
         const configureResponse = await proxiedFetch(
           "https://i.instagram.com/api/v1/media/configure/",
           {
@@ -684,27 +729,35 @@ serve(async (req) => {
             },
             body: `signed_body=SIGNATURE.${encodeURIComponent(JSON.stringify(configureData))}`,
           },
-          proxyClient!,
+          retryProxyClient,
         );
 
         const responseText = await configureResponse.text();
         try {
-          return JSON.parse(responseText);
+          configureResult = JSON.parse(responseText);
+          console.log("Configure response:", JSON.stringify(configureResult).substring(0, 500));
+          break; // Success
         } catch {
-          console.error(
-            "Failed to parse configure response:",
-            responseText.substring(0, 500),
-          );
-          throw new Error(
-            "Invalid response from Instagram: " + responseText.substring(0, 200),
-          );
+          console.error("Failed to parse configure response:", responseText.substring(0, 500));
+          throw new Error("Invalid response from Instagram: " + responseText.substring(0, 200));
         }
-      },
-      isRetryableError,
-      "Instagram Configure",
-    );
+      } catch (error) {
+        lastConfigureError = error;
+        console.error(`[Configure] Attempt ${attempt + 1} failed:`, error);
+        
+        if (attempt < MAX_RETRIES && isRetryableError(error)) {
+          const delay = RETRY_DELAYS[attempt] || RETRY_DELAYS[RETRY_DELAYS.length - 1];
+          console.log(`[Configure] Waiting ${delay}ms before retry...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        } else if (attempt >= MAX_RETRIES) {
+          throw error;
+        }
+      }
+    }
 
-    console.log("Configure response:", JSON.stringify(configureResult).substring(0, 500));
+    if (!configureResult) {
+      throw lastConfigureError || new Error("Configure failed after all retries");
+    }
 
     if (configureResult.status === "ok" && configureResult.media) {
       // Update posts count and safety tracking
