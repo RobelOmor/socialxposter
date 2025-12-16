@@ -217,16 +217,20 @@ serve(async (req) => {
       console.log('Session invalid or expired');
 
       const rawError = typeof vpsResult?.error === 'string' ? vpsResult.error : undefined;
-      const isSocksMissing = rawError?.toLowerCase().includes('missing dependencies for socks') ?? false;
+      const isSocksMissing =
+        rawError?.toLowerCase().includes('missing dependencies for socks') ?? false;
+
+      const socksProxyHint =
+        'VPS could not use the SOCKS proxy. If httpx[socks]/socksio is already installed, the proxy is likely not SOCKS5 or the credentials/IP allowlist are incorrect.';
 
       return new Response(
-        JSON.stringify({ 
-          success: false, 
+        JSON.stringify({
+          success: false,
           error: isSocksMissing
-            ? 'Instagram VPS-এ SOCKS support dependency নেই. VPS container এ `pip install "httpx[socks]"` (বা `socksio`) দিয়ে আবার restart/build করুন.'
+            ? `SOCKS proxy error: ${rawError}. ${socksProxyHint}`
             : (rawError || 'Session expired - cookies are invalid'),
-          reason: isSocksMissing ? 'vps_proxy_dependency_missing' : 'expired',
-          instagram_response: vpsResult
+          reason: isSocksMissing ? 'vps_proxy_error' : 'expired',
+          instagram_response: vpsResult,
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
