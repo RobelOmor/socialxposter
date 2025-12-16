@@ -75,15 +75,142 @@ const INSTAGRAM_MIN_RATIO = 4 / 5; // 0.8 (4:5)
 const INSTAGRAM_MAX_RATIO = 1.91; // 1.91:1
 const INSTAGRAM_MAX_DIMENSION = 1080; // standard feed max side
 const INSTAGRAM_JPEG_QUALITY = 85;
-const MAX_IMAGE_SIZE_FOR_PROCESSING = 500000; // 500KB - skip heavy processing for larger images
+
+// Guardrails to prevent Edge Function OOM (images can be small in bytes but huge in pixels)
+const MAX_IMAGE_BYTES_FOR_DECODE = 900_000; // 900KB
+const MAX_IMAGE_PIXELS_FOR_DECODE = 4_000_000; // 4MP
+
+type ImageDims = { width: number; height: number };
+
+function readU32BE(bytes: Uint8Array, offset: number): number {
+  return (
+    (bytes[offset] << 24) |
+    (bytes[offset + 1] << 16) |
+    (bytes[offset + 2] << 8) |
+    bytes[offset + 3]
+  ) >>> 0;
+}
+
+function getPngDimensions(bytes: Uint8Array): ImageDims | null {
+  // PNG signature: 89 50 4E 47 0D 0A 1A 0A
+  if (bytes.length < 24) return null;
+  if (
+    bytes[0] !== 0x89 ||
+    bytes[1] !== 0x50 ||
+    bytes[2] !== 0x4e ||
+    bytes[3] !== 0x47
+  ) {
+    return null;
+  }
+  const width = readU32BE(bytes, 16);
+  const height = readU32BE(bytes, 20);
+  return width && height ? { width, height } : null;
+}
+
+function getJpegDimensions(bytes: Uint8Array): ImageDims | null {
+  if (bytes.length < 4) return null;
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return null; // SOI
+
+  let i = 2;
+  while (i + 9 < bytes.length) {
+    if (bytes[i] !== 0xff) {
+      i++;
+      continue;
+    }
+
+    // Skip fill bytes 0xFF
+    while (i < bytes.length && bytes[i] === 0xff) i++;
+    if (i >= bytes.length) break;
+
+    const marker = bytes[i];
+    i++;
+
+    // Standalone markers (no length)
+    if (marker === 0xd9 || marker === 0xda) break; // EOI / SOS
+
+    if (i + 1 >= bytes.length) break;
+    const blockLength = (bytes[i] << 8) + bytes[i + 1];
+    if (blockLength < 2 || i + blockLength - 2 >= bytes.length) break;
+
+    // SOF0/SOF2 contain dimensions
+    if (
+      marker === 0xc0 ||
+      marker === 0xc1 ||
+      marker === 0xc2 ||
+      marker === 0xc3
+    ) {
+      // i: length MSB, i+1: length LSB
+      // i+2: precision
+      const height = (bytes[i + 3] << 8) + bytes[i + 4];
+      const width = (bytes[i + 5] << 8) + bytes[i + 6];
+      return width && height ? { width, height } : null;
+    }
+
+    i += blockLength;
+  }
+
+  return null;
+}
+
+function getImageDimensions(bytes: Uint8Array): ImageDims | null {
+  return getPngDimensions(bytes) || getJpegDimensions(bytes);
+}
+
+function optimizeRemoteImageUrl(rawUrl: string): string {
+  try {
+    const u = new URL(rawUrl);
+    const host = u.hostname;
+
+    // Pexels supports query-based resizing/cropping (dramatically reduces memory usage)
+    if (host.includes("images.pexels.com")) {
+      u.searchParams.set("auto", "compress");
+      u.searchParams.set("cs", "tinysrgb");
+      u.searchParams.set("fit", "crop");
+      u.searchParams.set("w", "1080");
+      u.searchParams.set("h", "1350"); // 4:5 ratio
+      u.searchParams.set("dpr", "1");
+      return u.toString();
+    }
+
+    // Unsplash supports query-based resizing; force jpg
+    if (host.includes("images.unsplash.com")) {
+      u.searchParams.set("fm", "jpg");
+      u.searchParams.set("q", "80");
+      u.searchParams.set("w", "1080");
+      u.searchParams.set("fit", "max");
+      return u.toString();
+    }
+
+    return rawUrl;
+  } catch {
+    return rawUrl;
+  }
+}
 
 async function normalizeImageForInstagram(
   originalBytes: Uint8Array,
-): Promise<{ bytes: Uint8Array; width: number; height: number }> {
-  // Skip heavy image processing for large images to avoid memory limit
-  if (originalBytes.length > MAX_IMAGE_SIZE_FOR_PROCESSING) {
-    console.log("Image too large for processing, sending as-is (1080x1080 assumed)");
-    return { bytes: originalBytes, width: 1080, height: 1080 };
+): Promise<{ bytes: Uint8Array; width: number; height: number; processed: boolean }> {
+  const dims = getImageDimensions(originalBytes);
+  const pixels = dims ? dims.width * dims.height : null;
+
+  const canDecode =
+    originalBytes.length <= MAX_IMAGE_BYTES_FOR_DECODE &&
+    (pixels == null || pixels <= MAX_IMAGE_PIXELS_FOR_DECODE);
+
+  // Skip heavy image processing when risky; still return real width/height if we can detect it.
+  if (!canDecode) {
+    console.log(
+      "Skipping image processing (OOM guard). bytes=",
+      originalBytes.length,
+      "dims=",
+      dims ? `${dims.width}x${dims.height}` : "unknown",
+    );
+    return {
+      bytes: originalBytes,
+      width: dims?.width ?? 1080,
+      height: dims?.height ?? 1080,
+      processed: false,
+    };
   }
 
   const img = await Image.decode(originalBytes);
@@ -121,7 +248,7 @@ async function normalizeImageForInstagram(
   }
 
   const bytes = await out.encodeJPEG(INSTAGRAM_JPEG_QUALITY);
-  return { bytes, width: out.width, height: out.height };
+  return { bytes, width: out.width, height: out.height, processed: true };
 }
 
 // Safety limits configuration
