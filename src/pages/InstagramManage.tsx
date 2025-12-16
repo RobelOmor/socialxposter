@@ -90,8 +90,16 @@ type SupabaseFunctionInvokeError = {
 };
 
 const getEdgeFunctionErrorMessage = (error: unknown, data?: any): string => {
-  if (data?.error) return String(data.error);
-  if (data?.message) return String(data.message);
+  const candidate =
+    (data?.error && String(data.error)) ||
+    (data?.message && String(data.message)) ||
+    undefined;
+
+  if (candidate?.toLowerCase().includes("allowed aspect ratio")) {
+    return "Image aspect ratio support kore na — 1:1 (square) ba 4:5 ratio image use korun.";
+  }
+
+  if (candidate) return candidate;
 
   const err = error as SupabaseFunctionInvokeError | null;
   const body = err?.context?.body;
@@ -99,10 +107,20 @@ const getEdgeFunctionErrorMessage = (error: unknown, data?: any): string => {
   if (typeof body === 'string' && body.trim()) {
     try {
       const parsed = JSON.parse(body);
-      if (parsed?.error) return String(parsed.error);
-      if (parsed?.message) return String(parsed.message);
-      return body;
+      const parsedMsg =
+        (parsed?.error && String(parsed.error)) ||
+        (parsed?.message && String(parsed.message)) ||
+        body;
+
+      if (parsedMsg?.toLowerCase?.().includes?.("allowed aspect ratio")) {
+        return "Image aspect ratio support kore na — 1:1 (square) ba 4:5 ratio image use korun.";
+      }
+
+      return parsedMsg;
     } catch {
+      if (body.toLowerCase().includes("allowed aspect ratio")) {
+        return "Image aspect ratio support kore na — 1:1 (square) ba 4:5 ratio image use korun.";
+      }
       return body;
     }
   }
@@ -1043,7 +1061,7 @@ export default function InstagramManage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={selectedAccounts.size === 0 || bulkRefreshing || totalCount === 0}
+                    disabled={selectedAccounts.size === 0 || bulkRefreshing}
                     className="gap-1.5"
                   >
                     <RefreshCw className={`h-4 w-4 ${bulkRefreshing ? 'animate-spin' : ''}`} />
@@ -1083,7 +1101,7 @@ export default function InstagramManage() {
               <Button
                 size="sm"
                 onClick={openBulkPostDialog}
-                disabled={selectedAccounts.size === 0 || totalCount === 0}
+                disabled={selectedAccounts.size === 0}
                 className="gap-1.5 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-white"
               >
                 <Send className="h-4 w-4" />
@@ -1256,7 +1274,7 @@ export default function InstagramManage() {
                               variant="outline"
                               size="sm"
                               onClick={() => openPostDialog(account)}
-                              disabled={account.status !== 'active' || totalCount === 0}
+                              disabled={account.status !== 'active'}
                             >
                               <ImagePlus className="h-4 w-4" />
                             </Button>
@@ -1264,7 +1282,6 @@ export default function InstagramManage() {
                               variant="outline"
                               size="sm"
                               onClick={() => handleRefreshAccount(account)}
-                              disabled={totalCount === 0}
                             >
                               <RefreshCw className="h-4 w-4" />
                             </Button>
