@@ -40,14 +40,25 @@ serve(async (req) => {
     
     // Handle different URL formats
     if (vpsBaseUrl.includes('.ngrok') || vpsBaseUrl.includes('ngrok-free.app')) {
+      // ngrok URL - use https without port
       if (!vpsBaseUrl.startsWith('http://') && !vpsBaseUrl.startsWith('https://')) {
         vpsBaseUrl = `https://${vpsBaseUrl}`;
       }
     } else if (vpsBaseUrl.startsWith('http://') || vpsBaseUrl.startsWith('https://')) {
-      // URL already has protocol, use as-is
+      // URL already has protocol - check if it has a port already
+      // If no port specified and not ngrok, add :8001
+      const urlObj = new URL(vpsBaseUrl);
+      if (!urlObj.port && !vpsBaseUrl.includes('ngrok')) {
+        vpsBaseUrl = `${urlObj.protocol}//${urlObj.hostname}:8001`;
+      }
     } else {
-      // Plain IP, use Instagram port 8001
-      vpsBaseUrl = `http://${vpsBaseUrl}:8001`;
+      // Plain IP without protocol - add http and port 8001
+      // Check if port is already included (e.g., "192.168.1.1:8001")
+      if (vpsBaseUrl.includes(':')) {
+        vpsBaseUrl = `http://${vpsBaseUrl}`;
+      } else {
+        vpsBaseUrl = `http://${vpsBaseUrl}:8001`;
+      }
     }
 
     // Remove trailing slash
