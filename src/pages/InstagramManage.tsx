@@ -296,10 +296,12 @@ export default function InstagramManage() {
   // Fetch proxies to map which account uses which proxy
   const fetchAccountProxies = async () => {
     if (!user) return;
+    // Only fetch proxies that are assigned to accounts (much smaller dataset, avoids 1000 row limit)
     const { data } = await supabase
       .from('instagram_proxies')
       .select('id, proxy_host, proxy_port, status, used_by_account_id')
-      .eq('user_id', user.id);
+      .eq('user_id', user.id)
+      .not('used_by_account_id', 'is', null);
     
     if (data) {
       const proxyMap = new Map<string, InstagramProxy>();
