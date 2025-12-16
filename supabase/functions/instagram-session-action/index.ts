@@ -30,7 +30,7 @@ serve(async (req) => {
       );
     }
 
-    const { accountId, action } = await req.json();
+    const { accountId, action, skipProxy } = await req.json();
     
     if (!accountId) {
       return new Response(
@@ -54,24 +54,29 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Performing ${action} on account:`, account.username);
+    console.log(`Performing ${action} on account:`, account.username, skipProxy ? '(WITHOUT PROXY)' : '(WITH PROXY)');
 
-    // Get assigned proxy for this account
-    const { data: assignedProxy, error: proxyFetchError } = await supabaseClient
-      .from('instagram_proxies')
-      .select('*')
-      .eq('used_by_account_id', accountId)
-      .single();
+    // Get assigned proxy for this account (skip if skipProxy is true)
+    let assignedProxy = null;
+    if (!skipProxy) {
+      const { data: proxyData, error: proxyFetchError } = await supabaseClient
+        .from('instagram_proxies')
+        .select('*')
+        .eq('used_by_account_id', accountId)
+        .single();
 
-    if (proxyFetchError || !assignedProxy) {
-      console.error('No assigned proxy for account:', accountId);
-      return new Response(
-        JSON.stringify({ success: false, error: 'No proxy assigned to this account. Please re-add the account.' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      if (proxyFetchError || !proxyData) {
+        console.error('No assigned proxy for account:', accountId);
+        return new Response(
+          JSON.stringify({ success: false, error: 'No proxy assigned to this account. Please re-add the account.' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      assignedProxy = proxyData;
+      console.log('Using assigned proxy:', assignedProxy.proxy_host, ':', assignedProxy.proxy_port);
+    } else {
+      console.log('SKIPPING PROXY - Direct connection mode');
     }
-
-    console.log('Using assigned proxy:', assignedProxy.proxy_host, ':', assignedProxy.proxy_port);
 
     // Get VPS IP from admin config
     const { data: config, error: configError } = await supabaseAdmin
@@ -103,24 +108,32 @@ serve(async (req) => {
 
     vpsBaseUrl = vpsBaseUrl.replace(/\/$/, '');
 
-    console.log(`Calling VPS for session validation: ${vpsBaseUrl}/validate-session`);
+    console.log(`Calling VPS for session validation: ${vpsBaseUrl}/validate-session`, skipProxy ? '(NO PROXY)' : '(WITH PROXY)');
 
-    // Call VPS to validate session with HTTP proxy (same as Telegram method)
+    // Build request body - conditionally include proxy fields
+    const requestBody: Record<string, unknown> = { 
+      cookies: account.cookies,
+    };
+
+    if (assignedProxy && !skipProxy) {
+      // Include proxy fields only when not skipping proxy
+      requestBody.proxy_host = assignedProxy.proxy_host;
+      requestBody.proxy_port = assignedProxy.proxy_port;
+      requestBody.proxy_username = assignedProxy.proxy_username;
+      requestBody.proxy_password = assignedProxy.proxy_password;
+      requestBody.proxy_type = 'http';
+    }
+
+    console.log('Request body:', JSON.stringify({ ...requestBody, cookies: '[HIDDEN]' }));
+
+    // Call VPS to validate session
     const vpsResponse = await fetch(`${vpsBaseUrl}/validate-session`, {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
         'ngrok-skip-browser-warning': 'true'
       },
-      body: JSON.stringify({ 
-        cookies: account.cookies,
-        // Telegram-style explicit fields for HTTP proxy
-        proxy_host: assignedProxy.proxy_host,
-        proxy_port: assignedProxy.proxy_port,
-        proxy_username: assignedProxy.proxy_username,
-        proxy_password: assignedProxy.proxy_password,
-        proxy_type: 'http',  // Use HTTP proxy, not SOCKS5
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     const vpsResult = await vpsResponse.json();
