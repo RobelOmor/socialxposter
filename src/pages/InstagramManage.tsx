@@ -81,6 +81,35 @@ const isToday = (dateString: string | null): boolean => {
   return date.toDateString() === today.toDateString();
 };
 
+type SupabaseFunctionInvokeError = {
+  message?: string;
+  context?: {
+    status?: number;
+    body?: string;
+  };
+};
+
+const getEdgeFunctionErrorMessage = (error: unknown, data?: any): string => {
+  if (data?.error) return String(data.error);
+  if (data?.message) return String(data.message);
+
+  const err = error as SupabaseFunctionInvokeError | null;
+  const body = err?.context?.body;
+
+  if (typeof body === 'string' && body.trim()) {
+    try {
+      const parsed = JSON.parse(body);
+      if (parsed?.error) return String(parsed.error);
+      if (parsed?.message) return String(parsed.message);
+      return body;
+    } catch {
+      return body;
+    }
+  }
+
+  return (err?.message && String(err.message)) || 'Unknown error';
+};
+
 export default function InstagramManage() {
   const { user, profile } = useAuth();
   const isMobile = useIsMobile();
@@ -326,40 +355,40 @@ export default function InstagramManage() {
 
     try {
       let imageData = imageUrl;
-      
+
       if (postMode === 'file' && imageFile) {
         const reader = new FileReader();
-        imageData = await new Promise((resolve) => {
+        imageData = await new Promise((resolve, reject) => {
+          reader.onerror = () => reject(new Error('Failed to read image file'));
           reader.onload = () => resolve(reader.result as string);
           reader.readAsDataURL(imageFile);
         });
       }
 
       const { data, error } = await supabase.functions.invoke('instagram-post-photo', {
-        body: { 
+        body: {
           accountId: selectedAccount.id,
           imageData,
-          imageUrl: postMode === 'url' ? imageUrl : undefined
-        }
+          imageUrl: postMode === 'url' ? imageUrl : undefined,
+        },
       });
 
-      if (error) throw error;
-
-      if (data.success) {
-        toast.success('Photo posted successfully!');
-        setPostOpen(false);
-        setImageFile(null);
-        setImageUrl('');
-        setImagePreview('');
-        fetchAccounts();
-      } else {
-        toast.error(data.error || 'Failed to post photo');
+      if (error || !data?.success) {
+        toast.error(getEdgeFunctionErrorMessage(error, data));
+        return;
       }
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to post photo');
-    }
 
-    setPosting(false);
+      toast.success('Photo posted successfully!');
+      setPostOpen(false);
+      setImageFile(null);
+      setImageUrl('');
+      setImagePreview('');
+      fetchAccounts();
+    } catch (error: unknown) {
+      toast.error(getEdgeFunctionErrorMessage(error));
+    } finally {
+      setPosting(false);
+    }
   };
 
   const openPostDialog = (account: InstagramAccount) => {
@@ -606,47 +635,35 @@ export default function InstagramManage() {
     // Process a single task
     const processTask = async (task: { account: InstagramAccount; photoItem: { id: string; photo_url: string } }) => {
       const { account, photoItem } = task;
-      
+
       try {
         const { data, error } = await supabase.functions.invoke('instagram-post-photo', {
-          body: { 
+          body: {
             accountId: account.id,
-            imageUrl: photoItem.photo_url
-          }
+            imageUrl: photoItem.photo_url,
+          },
         });
 
-        // Debug: Log the full API response
-        console.log('=== Instagram Post Photo API Response ===');
-        console.log('Account:', account.username);
-        console.log('Photo URL:', photoItem.photo_url);
-        console.log('Response data:', JSON.stringify(data, null, 2));
-        console.log('Error:', error);
-        console.log('=========================================');
-
         if (error || !data?.success) {
-          return { 
-            username: account.username, 
-            status: 'failed' as const, 
-            error: data?.error || data?.message || error?.message || 'Unknown error',
-            photoItemId: null
-          };
-        } else {
-          return { 
-            username: account.username, 
-            status: 'success' as const,
-            photoItemId: photoItem.id
+          return {
+            username: account.username,
+            status: 'failed' as const,
+            error: getEdgeFunctionErrorMessage(error, data),
+            photoItemId: null,
           };
         }
-      } catch (err: any) {
-        console.log('=== Instagram Post Photo CATCH Error ===');
-        console.log('Account:', account.username);
-        console.log('Error:', err);
-        console.log('=========================================');
-        return { 
-          username: account.username, 
-          status: 'failed' as const, 
-          error: err.message || 'Unknown error',
-          photoItemId: null
+
+        return {
+          username: account.username,
+          status: 'success' as const,
+          photoItemId: photoItem.id,
+        };
+      } catch (err: unknown) {
+        return {
+          username: account.username,
+          status: 'failed' as const,
+          error: getEdgeFunctionErrorMessage(err),
+          photoItemId: null,
         };
       }
     };
@@ -1529,7 +1546,7 @@ export default function InstagramManage() {
                             <CheckCircle2 className="h-4 w-4 text-green-500" />
                           ) : (
                             <>
-                              <span className="text-xs text-red-400 max-w-32 truncate">{detail.error}</span>
+                              <span title={detail.error} className="text-xs text-red-400 max-w-32 truncate">{detail.error}</span>
                               <XCircle className="h-4 w-4 text-red-500" />
                             </>
                           )}
