@@ -502,7 +502,7 @@ export default function InstagramManage() {
   };
 
   // Bulk refresh selected accounts
-  const handleBulkRefresh = async () => {
+  const handleBulkRefresh = async (skipProxy: boolean = false) => {
     if (selectedAccounts.size === 0) {
       toast.error('Please select accounts first');
       return;
@@ -514,16 +514,18 @@ export default function InstagramManage() {
     let failCount = 0;
     let suspendCount = 0;
 
-    toast.loading(`Refreshing ${selectedArray.length} accounts...`, { id: 'bulk-refresh' });
+    const proxyMode = skipProxy ? 'WITHOUT proxy' : 'WITH proxy';
+    toast.loading(`Refreshing ${selectedArray.length} accounts (${proxyMode})...`, { id: 'bulk-refresh' });
 
     for (const accountId of selectedArray) {
       try {
         const { data, error } = await supabase.functions.invoke('instagram-session-action', {
-          body: { accountId, action: 'refresh' }
+          body: { accountId, action: 'refresh', skipProxy }
         });
 
         if (error || !data.success) {
           failCount++;
+          console.log(`Refresh failed for ${accountId}:`, data?.error || error);
         } else {
           successCount++;
           
@@ -532,17 +534,18 @@ export default function InstagramManage() {
             suspendCount++;
           }
         }
-      } catch {
+      } catch (err) {
         failCount++;
+        console.log(`Refresh error for ${accountId}:`, err);
       }
     }
 
     if (suspendCount > 0) {
       toast.error(`${suspendCount} account(s) SUSPENDED!`, { id: 'bulk-refresh' });
     } else if (failCount === 0) {
-      toast.success(`${successCount} account(s) refreshed successfully`, { id: 'bulk-refresh' });
+      toast.success(`${successCount} account(s) refreshed (${proxyMode})`, { id: 'bulk-refresh' });
     } else {
-      toast.warning(`${successCount} refreshed, ${failCount} failed`, { id: 'bulk-refresh' });
+      toast.warning(`${successCount} refreshed, ${failCount} failed (${proxyMode})`, { id: 'bulk-refresh' });
     }
 
     setSelectedAccounts(new Set());
@@ -1035,16 +1038,30 @@ export default function InstagramManage() {
                 Batch ({selectedAccounts.size})
               </Button>
 
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleBulkRefresh}
-                disabled={selectedAccounts.size === 0 || bulkRefreshing || totalCount === 0}
-                className="gap-1.5"
-              >
-                <RefreshCw className={`h-4 w-4 ${bulkRefreshing ? 'animate-spin' : ''}`} />
-                Refresh ({selectedAccounts.size})
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={selectedAccounts.size === 0 || bulkRefreshing || totalCount === 0}
+                    className="gap-1.5"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${bulkRefreshing ? 'animate-spin' : ''}`} />
+                    Refresh ({selectedAccounts.size})
+                    <ChevronDown className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem onClick={() => handleBulkRefresh(false)}>
+                    <Globe className="h-4 w-4 mr-2" />
+                    With Proxy
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleBulkRefresh(true)}>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Without Proxy
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
 
               <Button
                 variant="outline"
