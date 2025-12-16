@@ -185,6 +185,19 @@ export default function InstagramManage() {
   // Proxy management state
   const [proxyModalOpen, setProxyModalOpen] = useState(false);
 
+  // Link to Post state
+  const [linkPostOpen, setLinkPostOpen] = useState(false);
+  const [linkPostUrl, setLinkPostUrl] = useState('');
+  const [linkPostPreview, setLinkPostPreview] = useState('');
+  const [linkPosting, setLinkPosting] = useState(false);
+  const [linkPostProgress, setLinkPostProgress] = useState(0);
+  const [linkPostReport, setLinkPostReport] = useState<{
+    success: number;
+    failed: number;
+    total: number;
+    details: { username: string; status: 'success' | 'failed'; error?: string }[];
+  } | null>(null);
+
   useEffect(() => {
     if (user) {
       fetchAccounts();
@@ -595,6 +608,128 @@ export default function InstagramManage() {
     setBulkPostReport(null);
     setBulkPostProgress(0);
     setBulkPostOpen(true);
+  };
+
+  // Open link post dialog
+  const openLinkPostDialog = () => {
+    if (selectedAccounts.size === 0) {
+      toast.error('Please select accounts first');
+      return;
+    }
+    setLinkPostUrl('');
+    setLinkPostPreview('');
+    setLinkPostReport(null);
+    setLinkPostProgress(0);
+    setLinkPostOpen(true);
+  };
+
+  // Handle link URL change with preview
+  const handleLinkPostUrlChange = (url: string) => {
+    setLinkPostUrl(url);
+    if (url.trim()) {
+      setLinkPostPreview(url);
+    } else {
+      setLinkPostPreview('');
+    }
+  };
+
+  // Handle link post to selected accounts
+  const handleLinkPost = async () => {
+    if (!linkPostUrl.trim()) {
+      toast.error('Please enter an image URL');
+      return;
+    }
+
+    if (selectedAccounts.size === 0) {
+      toast.error('No accounts selected');
+      return;
+    }
+
+    setLinkPosting(true);
+    setLinkPostProgress(0);
+    setLinkPostReport(null);
+
+    const selectedAccountsList = accounts.filter(a => selectedAccounts.has(a.id) && a.status === 'active');
+    const totalAccounts = selectedAccountsList.length;
+    
+    if (totalAccounts === 0) {
+      toast.error('No active accounts selected');
+      setLinkPosting(false);
+      return;
+    }
+
+    const details: { username: string; status: 'success' | 'failed'; error?: string }[] = [];
+    let successCount = 0;
+    let failedCount = 0;
+    let completedCount = 0;
+
+    const CONCURRENT_THREADS = 10;
+
+    // Process a single task
+    const processTask = async (account: InstagramAccount) => {
+      try {
+        const { data, error } = await supabase.functions.invoke('instagram-post-photo', {
+          body: {
+            accountId: account.id,
+            imageUrl: linkPostUrl.trim(),
+          },
+        });
+
+        if (error || !data?.success) {
+          return {
+            username: account.username,
+            status: 'failed' as const,
+            error: getEdgeFunctionErrorMessage(error, data),
+          };
+        }
+
+        return {
+          username: account.username,
+          status: 'success' as const,
+        };
+      } catch (err: unknown) {
+        return {
+          username: account.username,
+          status: 'failed' as const,
+          error: getEdgeFunctionErrorMessage(err),
+        };
+      }
+    };
+
+    // Process tasks in batches concurrently
+    for (let i = 0; i < selectedAccountsList.length; i += CONCURRENT_THREADS) {
+      const batch = selectedAccountsList.slice(i, i + CONCURRENT_THREADS);
+      
+      const results = await Promise.all(batch.map(processTask));
+      
+      for (const result of results) {
+        completedCount++;
+        if (result.status === 'success') {
+          successCount++;
+        } else {
+          failedCount++;
+        }
+        details.push({ 
+          username: result.username, 
+          status: result.status, 
+          error: result.error 
+        });
+      }
+
+      setLinkPostProgress(Math.round((completedCount / totalAccounts) * 100));
+    }
+
+    setLinkPostReport({
+      success: successCount,
+      failed: failedCount,
+      total: totalAccounts,
+      details
+    });
+
+    await fetchAccounts();
+    
+    setLinkPosting(false);
+    toast.success(`Link post complete: ${successCount} success, ${failedCount} failed`);
   };
 
   // Handle bulk photo post with concurrent processing
@@ -1107,6 +1242,16 @@ export default function InstagramManage() {
                 <Send className="h-4 w-4" />
                 Go Photo Post ({selectedAccounts.size})
               </Button>
+
+              <Button
+                size="sm"
+                onClick={openLinkPostDialog}
+                disabled={selectedAccounts.size === 0}
+                className="gap-1.5 bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white"
+              >
+                <LinkIcon className="h-4 w-4" />
+                Link to Post ({selectedAccounts.size})
+              </Button>
             </div>
 
             {/* Search Row */}
@@ -1592,6 +1737,130 @@ export default function InstagramManage() {
                   <Button 
                     onClick={() => {
                       setBulkPostOpen(false);
+                      setSelectedAccounts(new Set());
+                    }}
+                    className="w-full"
+                  >
+                    Done
+                  </Button>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Link to Post Dialog */}
+        <Dialog open={linkPostOpen} onOpenChange={(open) => {
+          if (!linkPosting) setLinkPostOpen(open);
+        }}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <LinkIcon className="h-5 w-5 text-blue-500" />
+                Link to Post
+              </DialogTitle>
+              <DialogDescription>
+                Post same photo to {selectedAccounts.size} selected account(s) using image URL
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              {!linkPostReport ? (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="link-post-url">Image URL</Label>
+                    <Input
+                      id="link-post-url"
+                      placeholder="https://example.com/image.jpg"
+                      value={linkPostUrl}
+                      onChange={(e) => handleLinkPostUrlChange(e.target.value)}
+                      disabled={linkPosting}
+                    />
+                  </div>
+
+                  {linkPostPreview && (
+                    <div className="border border-border rounded-lg p-4">
+                      <img 
+                        src={linkPostPreview} 
+                        alt="Preview" 
+                        className="max-h-48 mx-auto rounded-lg"
+                        onError={() => setLinkPostPreview('')}
+                      />
+                    </div>
+                  )}
+
+                  {linkPosting && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span>Posting to accounts...</span>
+                        <span>{linkPostProgress}%</span>
+                      </div>
+                      <Progress value={linkPostProgress} className="h-2" />
+                    </div>
+                  )}
+
+                  <Button 
+                    onClick={handleLinkPost}
+                    disabled={linkPosting || !linkPostUrl.trim()}
+                    className="w-full bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600"
+                  >
+                    {linkPosting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Posting...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="h-4 w-4 mr-2" />
+                        Start Post
+                      </>
+                    )}
+                  </Button>
+                </>
+              ) : (
+                <div className="space-y-4">
+                  {/* Report Summary */}
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="text-center p-3 bg-muted/50 rounded-lg">
+                      <p className="text-2xl font-bold text-foreground">{linkPostReport.total}</p>
+                      <p className="text-xs text-muted-foreground">Total</p>
+                    </div>
+                    <div className="text-center p-3 bg-green-500/10 rounded-lg">
+                      <p className="text-2xl font-bold text-green-500">{linkPostReport.success}</p>
+                      <p className="text-xs text-muted-foreground">Success</p>
+                    </div>
+                    <div className="text-center p-3 bg-red-500/10 rounded-lg">
+                      <p className="text-2xl font-bold text-red-500">{linkPostReport.failed}</p>
+                      <p className="text-xs text-muted-foreground">Failed</p>
+                    </div>
+                  </div>
+
+                  {/* Details */}
+                  <div className="max-h-48 overflow-y-auto space-y-2">
+                    {linkPostReport.details.map((detail, idx) => (
+                      <div 
+                        key={idx}
+                        className={`flex items-center justify-between p-2 rounded-lg text-sm ${
+                          detail.status === 'success' ? 'bg-green-500/10' : 'bg-red-500/10'
+                        }`}
+                      >
+                        <span className="font-medium">@{detail.username}</span>
+                        <div className="flex items-center gap-2">
+                          {detail.status === 'success' ? (
+                            <CheckCircle2 className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <>
+                              <span title={detail.error} className="text-xs text-red-400 max-w-32 truncate">{detail.error}</span>
+                              <XCircle className="h-4 w-4 text-red-500" />
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <Button 
+                    onClick={() => {
+                      setLinkPostOpen(false);
                       setSelectedAccounts(new Set());
                     }}
                     className="w-full"
