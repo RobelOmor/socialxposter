@@ -429,6 +429,17 @@ export default function InstagramManage() {
   const handleDeleteAccount = async (account: InstagramAccount) => {
     if (!confirm('Are you sure you want to remove this account?')) return;
 
+    // First, delete the assigned proxy for this account
+    const { error: proxyError } = await supabase
+      .from('instagram_proxies')
+      .delete()
+      .eq('used_by_account_id', account.id);
+
+    if (proxyError) {
+      console.error('Failed to delete proxy:', proxyError);
+    }
+
+    // Then delete the account
     const { error } = await supabase
       .from('instagram_accounts')
       .delete()
@@ -437,8 +448,9 @@ export default function InstagramManage() {
     if (error) {
       toast.error('Failed to delete account');
     } else {
-      toast.success('Account removed');
+      toast.success('Account and proxy removed');
       fetchAccounts();
+      refetchProxies();
     }
   };
 
@@ -706,6 +718,17 @@ export default function InstagramManage() {
     for (let i = 0; i < accountIds.length; i += BATCH_SIZE) {
       const batch = accountIds.slice(i, i + BATCH_SIZE);
       
+      // First, delete proxies assigned to these accounts
+      const { error: proxyError } = await supabase
+        .from('instagram_proxies')
+        .delete()
+        .in('used_by_account_id', batch);
+
+      if (proxyError) {
+        console.error('Failed to delete proxies:', proxyError);
+      }
+
+      // Then delete the accounts
       const { error } = await supabase
         .from('instagram_accounts')
         .delete()
@@ -724,12 +747,13 @@ export default function InstagramManage() {
       toast.error(`Failed to remove ${failCount} account(s)`);
     }
     if (successCount > 0) {
-      toast.success(`${successCount} account(s) removed successfully`);
+      toast.success(`${successCount} account(s) and proxies removed`);
     }
     
     setSelectedAccounts(new Set());
     setDeleteConfirmOpen(false);
     fetchAccounts();
+    refetchProxies();
     setBulkDeleting(false);
   };
 
