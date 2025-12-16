@@ -1,104 +1,56 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Function to get image dimensions from bytes (supports JPEG, PNG, GIF, WebP)
-function getImageDimensions(imageBytes: Uint8Array): { width: number; height: number } | null {
-  try {
-    // Check PNG signature (89 50 4E 47)
-    if (imageBytes[0] === 0x89 && imageBytes[1] === 0x50 && imageBytes[2] === 0x4E && imageBytes[3] === 0x47) {
-      // PNG: width at offset 16-19, height at offset 20-23 (big endian)
-      const width = (imageBytes[16] << 24) | (imageBytes[17] << 16) | (imageBytes[18] << 8) | imageBytes[19];
-      const height = (imageBytes[20] << 24) | (imageBytes[21] << 16) | (imageBytes[22] << 8) | imageBytes[23];
-      if (width > 0 && height > 0) {
-        console.log('Detected PNG dimensions:', width, 'x', height);
-        return { width, height };
-      }
-    }
-    
-    // Check GIF signature (47 49 46 38)
-    if (imageBytes[0] === 0x47 && imageBytes[1] === 0x49 && imageBytes[2] === 0x46 && imageBytes[3] === 0x38) {
-      // GIF: width at offset 6-7, height at offset 8-9 (little endian)
-      const width = imageBytes[6] | (imageBytes[7] << 8);
-      const height = imageBytes[8] | (imageBytes[9] << 8);
-      if (width > 0 && height > 0) {
-        console.log('Detected GIF dimensions:', width, 'x', height);
-        return { width, height };
-      }
-    }
-    
-    // Check WebP signature (RIFF....WEBP)
-    if (imageBytes[0] === 0x52 && imageBytes[1] === 0x49 && imageBytes[2] === 0x46 && imageBytes[3] === 0x46 &&
-        imageBytes[8] === 0x57 && imageBytes[9] === 0x45 && imageBytes[10] === 0x42 && imageBytes[11] === 0x50) {
-      // WebP VP8: look for VP8 chunk
-      if (imageBytes[12] === 0x56 && imageBytes[13] === 0x50 && imageBytes[14] === 0x38 && imageBytes[15] === 0x20) {
-        // VP8 lossy format
-        const width = ((imageBytes[26] | (imageBytes[27] << 8)) & 0x3FFF);
-        const height = ((imageBytes[28] | (imageBytes[29] << 8)) & 0x3FFF);
-        if (width > 0 && height > 0) {
-          console.log('Detected WebP VP8 dimensions:', width, 'x', height);
-          return { width, height };
-        }
-      }
-    }
-    
-    // Check JPEG (FF D8 FF)
-    if (imageBytes[0] === 0xFF && imageBytes[1] === 0xD8 && imageBytes[2] === 0xFF) {
-      // JPEG: Look for SOF0 (Start of Frame) marker
-      for (let i = 0; i < imageBytes.length - 10; i++) {
-        if (imageBytes[i] === 0xFF && 
-            (imageBytes[i + 1] === 0xC0 || imageBytes[i + 1] === 0xC1 || 
-             imageBytes[i + 1] === 0xC2 || imageBytes[i + 1] === 0xC3)) {
-          const height = (imageBytes[i + 5] << 8) | imageBytes[i + 6];
-          const width = (imageBytes[i + 7] << 8) | imageBytes[i + 8];
-          if (width > 0 && height > 0) {
-            console.log('Detected JPEG dimensions:', width, 'x', height);
-            return { width, height };
-          }
-        }
-      }
-    }
-    
-    return null;
-  } catch (e) {
-    console.error('Error detecting dimensions:', e);
-    return null;
-  }
-}
+const INSTAGRAM_MIN_RATIO = 4 / 5; // 0.8 (4:5)
+const INSTAGRAM_MAX_RATIO = 1.91;  // 1.91:1
+const INSTAGRAM_MAX_DIMENSION = 1080; // standard feed max side
+const INSTAGRAM_JPEG_QUALITY = 85;
 
-// Function to crop image dimensions to Instagram-allowed aspect ratio (center crop calculation)
-function getCroppedDimensions(width: number, height: number): { 
-  cropWidth: number; 
-  cropHeight: number;
-  offsetX: number;
-  offsetY: number;
-} {
-  const aspectRatio = width / height;
-  
-  // Instagram allows aspect ratios between 0.8 (4:5 portrait) and 1.91 (landscape)
-  const MIN_RATIO = 0.8;  // 4:5 portrait
-  const MAX_RATIO = 1.91; // 1.91:1 landscape
-  
-  let cropWidth = width;
-  let cropHeight = height;
-  let offsetX = 0;
-  let offsetY = 0;
-  
-  if (aspectRatio < MIN_RATIO) {
-    // Too tall, crop top and bottom to get 4:5
-    cropHeight = Math.floor(width / MIN_RATIO);
-    offsetY = Math.floor((height - cropHeight) / 2);
-  } else if (aspectRatio > MAX_RATIO) {
-    // Too wide, crop left and right to get 1.91:1
-    cropWidth = Math.floor(height * MAX_RATIO);
-    offsetX = Math.floor((width - cropWidth) / 2);
+async function normalizeImageForInstagram(
+  originalBytes: Uint8Array,
+): Promise<{ bytes: Uint8Array; width: number; height: number }> {
+  const img = await Image.decode(originalBytes);
+
+  const originalWidth = img.width;
+  const originalHeight = img.height;
+  const ratio = originalWidth / originalHeight;
+
+  let cropX = 0;
+  let cropY = 0;
+  let cropWidth = originalWidth;
+  let cropHeight = originalHeight;
+
+  if (ratio < INSTAGRAM_MIN_RATIO) {
+    // Too tall -> crop height
+    cropHeight = Math.floor(originalWidth / INSTAGRAM_MIN_RATIO);
+    cropY = Math.max(0, Math.floor((originalHeight - cropHeight) / 2));
+  } else if (ratio > INSTAGRAM_MAX_RATIO) {
+    // Too wide -> crop width
+    cropWidth = Math.floor(originalHeight * INSTAGRAM_MAX_RATIO);
+    cropX = Math.max(0, Math.floor((originalWidth - cropWidth) / 2));
   }
-  
-  return { cropWidth, cropHeight, offsetX, offsetY };
+
+  let out = img;
+  if (cropWidth !== originalWidth || cropHeight !== originalHeight) {
+    out = img.crop(cropX, cropY, cropWidth, cropHeight);
+  }
+
+  const maxDim = Math.max(out.width, out.height);
+  if (maxDim > INSTAGRAM_MAX_DIMENSION) {
+    const scale = INSTAGRAM_MAX_DIMENSION / maxDim;
+    const targetW = Math.max(1, Math.round(out.width * scale));
+    const targetH = Math.max(1, Math.round(out.height * scale));
+    out = out.resize(targetW, targetH);
+  }
+
+  const bytes = await out.encodeJPEG(INSTAGRAM_JPEG_QUALITY);
+  return { bytes, width: out.width, height: out.height };
 }
 
 serve(async (req) => {
@@ -222,21 +174,27 @@ serve(async (req) => {
 
     console.log('Image size:', imageBytes.length, 'bytes');
 
-    // Get actual image dimensions (supports JPEG, PNG, GIF, WebP)
-    const dimensions = getImageDimensions(imageBytes);
+    // IMPORTANT: Instagram checks the REAL uploaded image aspect ratio.
+    // So we must actually crop/resize the image bytes (not only send crop params).
     let imgWidth = 1080;
     let imgHeight = 1080;
-    
-    if (dimensions) {
-      imgWidth = dimensions.width;
-      imgHeight = dimensions.height;
-    } else {
-      console.log('Could not detect dimensions, using default 1080x1080');
-    }
 
-    // Calculate crop for Instagram-allowed aspect ratio
-    const { cropWidth, cropHeight, offsetX, offsetY } = getCroppedDimensions(imgWidth, imgHeight);
-    console.log('Crop dimensions:', cropWidth, 'x', cropHeight, 'offset:', offsetX, offsetY);
+    try {
+      const normalized = await normalizeImageForInstagram(imageBytes);
+      imageBytes = normalized.bytes;
+      imgWidth = normalized.width;
+      imgHeight = normalized.height;
+      console.log('Final image for Instagram:', imgWidth, 'x', imgHeight, 'bytes:', imageBytes.length);
+    } catch (e) {
+      console.error('Image decode/normalize failed:', e);
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Unsupported/corrupt image. Please try a direct JPG/PNG image link.',
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
 
     // Generate upload ID
     const uploadId = Date.now().toString();
@@ -253,11 +211,12 @@ serve(async (req) => {
       'X-Instagram-Rupload-Params': JSON.stringify({
         'media_type': 1,
         'upload_id': uploadId,
-        'upload_media_height': cropHeight,
-        'upload_media_width': cropWidth,
+        'upload_media_height': imgHeight,
+        'upload_media_width': imgWidth,
       }),
       'X-Entity-Name': uploadName,
       'X-Entity-Length': imageBytes.length.toString(),
+      'X-Entity-Type': 'image/jpeg',
       'Content-Type': 'application/octet-stream',
       'Offset': '0',
     };
@@ -309,13 +268,13 @@ serve(async (req) => {
         'android_release': '13'
       },
       'edits': {
-        'crop_original_size': [cropWidth, cropHeight],
+        'crop_original_size': [imgWidth, imgHeight],
         'crop_center': [0.0, 0.0],
         'crop_zoom': 1.0
       },
       'extra': {
-        'source_width': cropWidth,
-        'source_height': cropHeight
+        'source_width': imgWidth,
+        'source_height': imgHeight
       }
     };
 
