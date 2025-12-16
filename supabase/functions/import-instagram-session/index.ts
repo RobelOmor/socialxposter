@@ -12,11 +12,15 @@ serve(async (req) => {
   }
 
   try {
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
-    );
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+
+    const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: req.headers.get('Authorization')! } }
+    });
+
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
     if (authError || !user) {
@@ -34,6 +38,26 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    // Check for available proxy first
+    const { data: availableProxy, error: proxyError } = await supabaseClient
+      .from('instagram_proxies')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('status', 'available')
+      .is('used_by_account_id', null)
+      .limit(1)
+      .single();
+
+    if (proxyError || !availableProxy) {
+      console.log('No available proxy found');
+      return new Response(
+        JSON.stringify({ success: false, error: 'No available proxy. Please add a proxy first.' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log('Using proxy:', availableProxy.proxy_host, ':', availableProxy.proxy_port);
 
     // Parse cookies to extract required values - supports string, JSON object, and JSON array formats
     let cookieObj: Record<string, string> = {};
@@ -95,41 +119,62 @@ serve(async (req) => {
 
     console.log('Validating Instagram session for user:', dsUserId);
 
-    // Fetch user info from Instagram
-    const userInfoResponse = await fetch(
-      `https://i.instagram.com/api/v1/users/${dsUserId}/info/`,
-      {
-        headers: {
-          'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229258)',
-          'X-CSRFToken': csrfToken,
-          'X-IG-App-ID': '936619743392459',
-          'Cookie': cookieString,
-        },
-      }
-    );
+    // Get VPS IP from admin config
+    const { data: config, error: configError } = await supabaseAdmin
+      .from('telegram_admin_config')
+      .select('instagram_vps_ip')
+      .single();
 
-    const responseText = await userInfoResponse.text();
-    console.log('Instagram API Response Status:', userInfoResponse.status);
-    console.log('Instagram API Response Body:', responseText);
-
-    let userInfo;
-    try {
-      userInfo = JSON.parse(responseText);
-    } catch (e) {
-      console.error('Failed to parse Instagram response:', e);
+    if (configError || !config?.instagram_vps_ip) {
+      console.error('Instagram VPS IP not configured:', configError);
       return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'Invalid response from Instagram',
-          details: responseText.substring(0, 200)
-        }),
+        JSON.stringify({ success: false, error: 'Instagram VPS IP not configured in admin panel' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
+    let vpsBaseUrl = config.instagram_vps_ip;
+    
+    // Handle different URL formats
+    if (vpsBaseUrl.includes('.ngrok') || vpsBaseUrl.includes('ngrok-free.app')) {
+      if (!vpsBaseUrl.startsWith('http://') && !vpsBaseUrl.startsWith('https://')) {
+        vpsBaseUrl = `https://${vpsBaseUrl}`;
+      }
+    } else if (vpsBaseUrl.startsWith('http://') || vpsBaseUrl.startsWith('https://')) {
+      // URL already has protocol, use as-is
+    } else {
+      // Plain IP, use Instagram port 8001
+      vpsBaseUrl = `http://${vpsBaseUrl}:8001`;
+    }
+
+    vpsBaseUrl = vpsBaseUrl.replace(/\/$/, '');
+
+    // Build proxy string for VPS
+    const proxyString = availableProxy.proxy_username && availableProxy.proxy_password
+      ? `socks5://${availableProxy.proxy_username}:${availableProxy.proxy_password}@${availableProxy.proxy_host}:${availableProxy.proxy_port}`
+      : `socks5://${availableProxy.proxy_host}:${availableProxy.proxy_port}`;
+
+    console.log('Calling VPS for session validation with proxy:', vpsBaseUrl);
+
+    // Call VPS to validate session with proxy
+    const vpsResponse = await fetch(`${vpsBaseUrl}/validate-session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        cookies: cookieString,
+        proxy: proxyString
+      }),
+    });
+
+    const vpsResult = await vpsResponse.json();
+    console.log('VPS Response:', JSON.stringify(vpsResult));
+
+    const isValid = (vpsResult?.success && vpsResult?.user) || vpsResult?.valid === true;
+    
     // Check for suspended account
-    const isSuspended = userInfo.message === 'challenge_required' && 
-      userInfo.challenge?.url?.includes('instagram.com/accounts/suspended');
+    const isSuspended = vpsResult?.status === 'suspended' ||
+      vpsResult?.message === 'challenge_required' ||
+      (typeof vpsResult?.url === 'string' && vpsResult.url.includes('instagram.com/accounts/suspended/'));
     
     if (isSuspended) {
       console.log('Account is SUSPENDED');
@@ -138,76 +183,51 @@ serve(async (req) => {
           success: false, 
           error: 'Account is SUSPENDED by Instagram',
           reason: 'suspended',
-          instagram_response: userInfo
+          instagram_response: vpsResult
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Check for challenge required (not suspended but needs verification)
-    if (userInfo.message === 'challenge_required') {
-      console.log('Challenge required:', userInfo.challenge?.url);
+    // Check for challenge required
+    if (vpsResult?.message === 'challenge_required') {
+      console.log('Challenge required');
       return new Response(
         JSON.stringify({ 
           success: false, 
           error: 'Account requires verification - please verify on Instagram app first',
           reason: 'challenge_required',
-          instagram_response: userInfo
+          instagram_response: vpsResult
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Check for login required
-    if (userInfo.message === 'login_required' || userInfo.message === 'Please wait a few minutes before you try again.') {
-      console.log('Login required or rate limited');
+    // Check for login required / expired
+    if (!isValid) {
+      console.log('Session invalid or expired');
       return new Response(
         JSON.stringify({ 
           success: false, 
-          error: userInfo.message === 'login_required' ? 'Session expired - cookies are invalid' : 'Rate limited - please try again later',
-          reason: userInfo.message === 'login_required' ? 'expired' : 'rate_limited',
-          instagram_response: userInfo
+          error: vpsResult?.error || 'Session expired - cookies are invalid',
+          reason: 'expired',
+          instagram_response: vpsResult
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Check for other errors
-    if (!userInfoResponse.ok || userInfo.status === 'fail') {
-      console.error('Instagram API error:', userInfoResponse.status, userInfo.message);
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: userInfo.message || 'Invalid or expired session cookies',
-          reason: 'api_error',
-          instagram_response: userInfo
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    const igUser = vpsResult?.user && typeof vpsResult.user === 'object' ? vpsResult.user : vpsResult;
+    const username = igUser?.username || igUser?.full_name || `user_${dsUserId}`;
 
-    const igUser = userInfo.user;
-
-    if (!igUser) {
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'Could not fetch Instagram user info - invalid response',
-          reason: 'no_user_data',
-          instagram_response: userInfo
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    console.log('Instagram user found:', igUser.username);
+    console.log('Instagram user found:', username);
 
     // Check if account already exists
     const { data: existingAccount } = await supabaseClient
       .from('instagram_accounts')
       .select('id')
       .eq('user_id', user.id)
-      .eq('username', igUser.username)
+      .eq('username', username)
       .single();
 
     if (existingAccount) {
@@ -217,44 +237,63 @@ serve(async (req) => {
           success: false, 
           error: 'Account already connected',
           duplicate: true,
-          data: { username: igUser.username }
+          data: { username }
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
-    } else {
-      // Insert new account
-      const { error: insertError } = await supabaseClient
-        .from('instagram_accounts')
-        .insert({
-          user_id: user.id,
-          username: igUser.username,
-          full_name: igUser.full_name,
-          profile_pic_url: igUser.profile_pic_url,
-          posts_count: igUser.media_count || 0,
-          followers_count: igUser.follower_count || 0,
-          following_count: igUser.following_count || 0,
-          bio: igUser.biography || '',
-          cookies: cookieString,
-          status: 'active',
-          last_checked: new Date().toISOString(),
-        });
+    }
 
-      if (insertError) {
-        console.error('Insert error:', insertError);
-        return new Response(
-          JSON.stringify({ success: false, error: 'Failed to save account' }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
+    // Insert new account
+    const { data: newAccount, error: insertError } = await supabaseClient
+      .from('instagram_accounts')
+      .insert({
+        user_id: user.id,
+        username: username,
+        full_name: igUser?.full_name || '',
+        profile_pic_url: igUser?.profile_pic_url || null,
+        posts_count: igUser?.media_count ?? igUser?.posts_count ?? 0,
+        followers_count: igUser?.follower_count ?? igUser?.followers_count ?? 0,
+        following_count: igUser?.following_count ?? 0,
+        bio: igUser?.biography ?? igUser?.bio ?? '',
+        cookies: cookieString,
+        status: 'active',
+        last_checked: new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      console.error('Insert error:', insertError);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Failed to save account' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Mark proxy as used by this account
+    const { error: proxyUpdateError } = await supabaseClient
+      .from('instagram_proxies')
+      .update({ 
+        status: 'used',
+        used_by_account_id: newAccount.id,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', availableProxy.id);
+
+    if (proxyUpdateError) {
+      console.error('Failed to update proxy status:', proxyUpdateError);
+    } else {
+      console.log('Proxy marked as used for account:', newAccount.id);
     }
 
     return new Response(
       JSON.stringify({ 
         success: true, 
         data: {
-          username: igUser.username,
-          full_name: igUser.full_name,
-        }
+          username: username,
+          full_name: igUser?.full_name || '',
+        },
+        proxy_used: true
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

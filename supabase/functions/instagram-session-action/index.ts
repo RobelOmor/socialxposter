@@ -12,11 +12,15 @@ serve(async (req) => {
   }
 
   try {
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
-    );
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+
+    const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: req.headers.get('Authorization')! } }
+    });
+
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
     if (authError || !user) {
@@ -52,11 +56,24 @@ serve(async (req) => {
 
     console.log(`Performing ${action} on account:`, account.username);
 
-    // Get VPS IP from admin config
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
+    // Get assigned proxy for this account
+    const { data: assignedProxy, error: proxyFetchError } = await supabaseClient
+      .from('instagram_proxies')
+      .select('*')
+      .eq('used_by_account_id', accountId)
+      .single();
 
+    if (proxyFetchError || !assignedProxy) {
+      console.error('No assigned proxy for account:', accountId);
+      return new Response(
+        JSON.stringify({ success: false, error: 'No proxy assigned to this account. Please re-add the account.' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log('Using assigned proxy:', assignedProxy.proxy_host, ':', assignedProxy.proxy_port);
+
+    // Get VPS IP from admin config
     const { data: config, error: configError } = await supabaseAdmin
       .from('telegram_admin_config')
       .select('instagram_vps_ip')
@@ -86,13 +103,21 @@ serve(async (req) => {
 
     vpsBaseUrl = vpsBaseUrl.replace(/\/$/, '');
 
+    // Build proxy string for VPS
+    const proxyString = assignedProxy.proxy_username && assignedProxy.proxy_password
+      ? `socks5://${assignedProxy.proxy_username}:${assignedProxy.proxy_password}@${assignedProxy.proxy_host}:${assignedProxy.proxy_port}`
+      : `socks5://${assignedProxy.proxy_host}:${assignedProxy.proxy_port}`;
+
     console.log(`Calling VPS for session validation: ${vpsBaseUrl}/validate-session`);
 
-    // Call VPS to validate session
+    // Call VPS to validate session with proxy
     const vpsResponse = await fetch(`${vpsBaseUrl}/validate-session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cookies: account.cookies }),
+      body: JSON.stringify({ 
+        cookies: account.cookies,
+        proxy: proxyString
+      }),
     });
 
     const vpsResult = await vpsResponse.json();
