@@ -49,7 +49,10 @@ export type Database = {
           full_name: string | null
           id: string
           last_checked: string | null
+          last_posted_at: string | null
           posts_count: number | null
+          posts_today: number | null
+          posts_today_date: string | null
           profile_pic_url: string | null
           status: Database["public"]["Enums"]["account_status"] | null
           updated_at: string | null
@@ -66,7 +69,10 @@ export type Database = {
           full_name?: string | null
           id?: string
           last_checked?: string | null
+          last_posted_at?: string | null
           posts_count?: number | null
+          posts_today?: number | null
+          posts_today_date?: string | null
           profile_pic_url?: string | null
           status?: Database["public"]["Enums"]["account_status"] | null
           updated_at?: string | null
@@ -83,7 +89,10 @@ export type Database = {
           full_name?: string | null
           id?: string
           last_checked?: string | null
+          last_posted_at?: string | null
           posts_count?: number | null
+          posts_today?: number | null
+          posts_today_date?: string | null
           profile_pic_url?: string | null
           status?: Database["public"]["Enums"]["account_status"] | null
           updated_at?: string | null
@@ -102,6 +111,7 @@ export type Database = {
       }
       instagram_proxies: {
         Row: {
+          accounts_count: number | null
           created_at: string | null
           id: string
           last_tested_at: string | null
@@ -117,6 +127,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          accounts_count?: number | null
           created_at?: string | null
           id?: string
           last_tested_at?: string | null
@@ -132,6 +143,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          accounts_count?: number | null
           created_at?: string | null
           id?: string
           last_tested_at?: string | null
