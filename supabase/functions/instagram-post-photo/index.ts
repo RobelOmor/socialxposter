@@ -7,6 +7,50 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Auto-retry configuration
+const MAX_RETRIES = 3;
+const RETRY_DELAYS = [1000, 2000, 4000]; // Exponential backoff in ms
+
+// Retry helper with exponential backoff
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  retryOn: (error: any) => boolean,
+  context: string
+): Promise<T> {
+  let lastError: any;
+  
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      
+      if (attempt < MAX_RETRIES && retryOn(error)) {
+        const delay = RETRY_DELAYS[attempt] || RETRY_DELAYS[RETRY_DELAYS.length - 1];
+        console.log(`[${context}] Retry attempt ${attempt + 1}/${MAX_RETRIES} after ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        throw error;
+      }
+    }
+  }
+  
+  throw lastError;
+}
+
+// Check if error is retryable (network/timeout issues)
+function isRetryableError(error: any): boolean {
+  const message = String(error?.message || error || '').toLowerCase();
+  return (
+    message.includes('timeout') ||
+    message.includes('network') ||
+    message.includes('econnreset') ||
+    message.includes('econnrefused') ||
+    message.includes('socket') ||
+    message.includes('fetch failed')
+  );
+}
+
 const INSTAGRAM_MIN_RATIO = 4 / 5; // 0.8 (4:5)
 const INSTAGRAM_MAX_RATIO = 1.91;  // 1.91:1
 const INSTAGRAM_MAX_DIMENSION = 1080; // standard feed max side
@@ -280,13 +324,19 @@ serve(async (req) => {
       'Offset': '0',
     };
 
-    const uploadResponse = await fetch(`https://i.instagram.com/rupload_igphoto/${uploadName}`, {
-      method: 'POST',
-      headers: uploadHeaders,
-      body: imageBytes.buffer as ArrayBuffer,
-    });
-
-    const uploadResult = await uploadResponse.json();
+    // Upload with retry
+    const uploadResult = await withRetry(
+      async () => {
+        const uploadResponse = await fetch(`https://i.instagram.com/rupload_igphoto/${uploadName}`, {
+          method: 'POST',
+          headers: uploadHeaders,
+          body: imageBytes.buffer as ArrayBuffer,
+        });
+        return await uploadResponse.json();
+      },
+      isRetryableError,
+      'Instagram Upload'
+    );
     console.log('Upload response:', JSON.stringify(uploadResult));
 
     if (!uploadResult.upload_id) {
@@ -339,19 +389,25 @@ serve(async (req) => {
 
     console.log('Configure data:', JSON.stringify(configureData));
 
-    const configureResponse = await fetch('https://i.instagram.com/api/v1/media/configure/', {
-      method: 'POST',
-      headers: {
-        'Cookie': cookieString,
-        'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229237)',
-        'X-IG-App-ID': '936619743392459',
-        'X-CSRFToken': csrfToken,
-        'Content-Type': 'application/x-www-form-urlencoded',
+    // Configure with retry
+    const configureResult = await withRetry(
+      async () => {
+        const configureResponse = await fetch('https://i.instagram.com/api/v1/media/configure/', {
+          method: 'POST',
+          headers: {
+            'Cookie': cookieString,
+            'User-Agent': 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229237)',
+            'X-IG-App-ID': '936619743392459',
+            'X-CSRFToken': csrfToken,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: `signed_body=SIGNATURE.${encodeURIComponent(JSON.stringify(configureData))}`,
+        });
+        return await configureResponse.json();
       },
-      body: `signed_body=SIGNATURE.${encodeURIComponent(JSON.stringify(configureData))}`,
-    });
-
-    const configureResult = await configureResponse.json();
+      isRetryableError,
+      'Instagram Configure'
+    );
     console.log('Configure response:', JSON.stringify(configureResult).substring(0, 500));
 
     if (configureResult.status === 'ok' && configureResult.media) {

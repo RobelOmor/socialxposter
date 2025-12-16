@@ -759,12 +759,12 @@ export default function InstagramManage() {
     let failedCount = 0;
     let completedCount = 0;
 
-    // Reduced concurrent threads to be safer
-    const CONCURRENT_THREADS = 3;
+    // Increased concurrent threads for faster processing (each account has unique proxy)
+    const CONCURRENT_THREADS = 15;
     
-    // Random delay helper (30-90 seconds between batches)
+    // Random delay helper (5-15 seconds between batches - faster with unique proxies)
     const randomDelay = () => new Promise(resolve => 
-      setTimeout(resolve, Math.floor(Math.random() * 60000) + 30000)
+      setTimeout(resolve, Math.floor(Math.random() * 10000) + 5000)
     );
 
     // Process a single task
@@ -908,7 +908,7 @@ export default function InstagramManage() {
     let completedCount = 0;
 
     const totalToProcess = Math.min(selectedAccountsList.length, photoItems.length);
-    const CONCURRENT_THREADS = 10; // Number of parallel requests
+    const CONCURRENT_THREADS = 15; // Increased for faster processing (each account has unique proxy)
 
     // Create account-photo pairs
     const tasks = selectedAccountsList.slice(0, totalToProcess).map((account, index) => ({

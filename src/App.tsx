@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import InstagramManage from "./pages/InstagramManage";
+import InstagramMonitoring from "./pages/InstagramMonitoring";
 import Settings from "./pages/Settings";
 import Admin from "./pages/Admin";
 import AdminUsers from "./pages/admin/AdminUsers";
@@ -65,6 +66,7 @@ function AppRoutes() {
       <Route path="/auth" element={<PublicRoute><Auth /></PublicRoute>} />
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/instagram-manage" element={<ProtectedRoute><InstagramManage /></ProtectedRoute>} />
+      <Route path="/instagram-monitoring" element={<ProtectedRoute><InstagramMonitoring /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
       <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
       <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
