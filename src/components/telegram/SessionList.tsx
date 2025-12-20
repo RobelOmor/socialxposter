@@ -13,7 +13,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Trash2, Edit2, Save, X, Phone, Globe, MessageSquare, Reply, Send, Users } from "lucide-react";
+import { Trash2, Edit2, Save, X, Phone, Globe, MessageSquare, Reply, Send, Users, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -521,6 +521,37 @@ export const SessionList = ({
                       title="View & Reply"
                     >
                       <Reply className="h-4 w-4" />
+                    </Button>
+                    {/* Download Session Button */}
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      className="text-cyan-400"
+                      onClick={() => {
+                        const sessionBackup = {
+                          phone_number: session.phone_number,
+                          session_name: session.session_name,
+                          telegram_name: session.telegram_name,
+                          session_data: session.session_data,
+                          proxy_host: session.proxy_host,
+                          proxy_port: session.proxy_port,
+                          proxy_username: session.proxy_username,
+                          proxy_password: session.proxy_password,
+                        };
+                        const blob = new Blob([JSON.stringify(sessionBackup, null, 2)], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `telegram_session_${session.phone_number}.json`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        toast({ title: "Downloaded", description: `Session backup saved` });
+                      }}
+                      title="Download Session Backup"
+                    >
+                      <Download className="h-4 w-4" />
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => handleEditProxy(session)}>
                       <Edit2 className="h-4 w-4" />
