@@ -528,21 +528,12 @@ export const SessionList = ({
                       variant="ghost" 
                       className="text-cyan-400"
                       onClick={() => {
-                        const sessionBackup = {
-                          phone_number: session.phone_number,
-                          session_name: session.session_name,
-                          telegram_name: session.telegram_name,
-                          session_data: session.session_data,
-                          proxy_host: session.proxy_host,
-                          proxy_port: session.proxy_port,
-                          proxy_username: session.proxy_username,
-                          proxy_password: session.proxy_password,
-                        };
-                        const blob = new Blob([JSON.stringify(sessionBackup, null, 2)], { type: 'application/json' });
+                        const blob = new Blob([session.session_data], { type: 'application/octet-stream' });
                         const url = URL.createObjectURL(blob);
                         const a = document.createElement('a');
                         a.href = url;
-                        a.download = `telegram_session_${session.phone_number}.json`;
+                        const filename = session.session_name || session.phone_number;
+                        a.download = `${filename}.session`;
                         document.body.appendChild(a);
                         a.click();
                         document.body.removeChild(a);
