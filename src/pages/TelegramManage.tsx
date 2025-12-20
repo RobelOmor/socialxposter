@@ -1348,6 +1348,27 @@ export default function TelegramManage() {
                           <Button
                             size="sm"
                             variant="ghost"
+                            className="text-cyan-400"
+                            onClick={() => {
+                              const blob = new Blob([session.session_data], { type: 'application/octet-stream' });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              const filename = session.session_name || session.phone_number;
+                              a.download = `${filename}.session`;
+                              document.body.appendChild(a);
+                              a.click();
+                              document.body.removeChild(a);
+                              URL.revokeObjectURL(url);
+                              toast.success('Session backup downloaded');
+                            }}
+                            title="Download Session Backup"
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
                             onClick={() => openEditProxy(session)}
                             title="Edit Proxy"
                           >
